@@ -1,0 +1,53 @@
+{
+ "actions": [],
+ "creation": "2026-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "bench_path",
+  "column_break_1",
+  "auto_detect_path"
+ ],
+ "fields": [
+  {
+   "fieldname": "bench_path",
+   "fieldtype": "Data",
+   "label": "Bench Path",
+   "description": "Absolute path to the Frappe bench directory. Leave blank to auto-detect."
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "auto_detect_path",
+   "fieldtype": "Check",
+   "label": "Auto Detect Path"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Bench Manager",
+ "name": "Bench Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

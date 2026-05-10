@@ -1,0 +1,95 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "command",
+  "status",
+  "column_break_1",
+  "executed_by",
+  "section_break_output",
+  "output",
+  "section_break_error",
+  "error"
+ ],
+ "fields": [
+  {
+   "fieldname": "command",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Command",
+   "reqd": 1
+  },
+  {
+   "default": "Running",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Queued\nRunning\nSuccess\nFailed"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "__user",
+   "fieldname": "executed_by",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Executed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "section_break_output",
+   "fieldtype": "Section Break",
+   "label": "Output"
+  },
+  {
+   "fieldname": "output",
+   "fieldtype": "Code",
+   "label": "Output",
+   "options": "text"
+  },
+  {
+   "fieldname": "section_break_error",
+   "fieldtype": "Section Break",
+   "label": "Error"
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Code",
+   "label": "Error",
+   "options": "text"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "in_create": 1,
+ "links": [],
+ "modified": "2026-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Bench Manager",
+ "name": "Bench Command Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

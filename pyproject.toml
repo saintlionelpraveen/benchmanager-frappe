@@ -1,0 +1,15 @@
+[project]
+name = "bench_manager"
+authors = [
+    { name = "Praveen", email = "admin@example.com" }
+]
+description = "A Frappe app to manage Bench operations via GUI"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core:buildapi"
+
+[tool.bench.frappe-app]

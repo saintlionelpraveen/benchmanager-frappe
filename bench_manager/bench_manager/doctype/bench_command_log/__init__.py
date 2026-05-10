@@ -1,0 +1,1 @@
+# Bench Command Log DocType
