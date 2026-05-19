@@ -6,6 +6,7 @@ bench path detection, and command logging.
 
 import os
 import re
+import shutil
 import subprocess
 import frappe
 
@@ -27,16 +28,16 @@ def get_bench_path():
         bench_path = os.path.abspath(os.path.join(app_path, "..", "..", ".."))
         if validate_bench_path(bench_path):
             return bench_path
-    except Exception:
-        pass
+    except Exception as e:
+        frappe.logger("bench_manager").error(f"Error resolving bench path: {e}")
 
     # Fallback: check Bench Settings
     try:
         settings_path = frappe.db.get_single_value("Bench Settings", "bench_path")
         if settings_path and validate_bench_path(settings_path):
             return settings_path
-    except Exception:
-        pass
+    except Exception as e:
+        frappe.logger("bench_manager").error(f"Error reading Bench Settings: {e}")
 
     frappe.throw("Could not auto-detect bench path. Please set it in Bench Settings.")
 
@@ -83,6 +84,9 @@ def sanitize_input(value, field_name="input"):
         frappe.throw(f"{field_name} cannot be empty")
 
     value = str(value).strip()
+
+    if value.startswith("-"):
+        frappe.throw(f"Invalid {field_name}: cannot start with a hyphen")
 
     if not re.match(r"^[a-zA-Z0-9._-]+$", value):
         frappe.throw(
@@ -132,115 +136,215 @@ def sanitize_git_url(url):
     return url
 
 
-def run_bench_command(command_parts, bench_path=None, realtime=True):
+def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, stdin_data=None, site=None):
     """Run a bench CLI command with proper error handling and real-time output.
 
-    Executes the command as a subprocess, streams output via frappe.realtime,
-    and logs the result to Bench Command Log.
+    Uses a pseudo-terminal (pty) so that subprocess output includes progress
+    bars and all verbose output that bench/click would normally suppress
+    when stdout is a pipe.
 
     Args:
         command_parts (list): List of command arguments (e.g., ['new-site', 'mysite']).
         bench_path (str, optional): Path to bench directory. Auto-detected if None.
         realtime (bool): Whether to publish real-time output updates.
-
-    Returns:
-        dict: Dictionary with 'output', 'error', 'returncode' keys.
+        user (str, optional): User who initiated the command. Defaults to frappe.session.user.
+        stdin_data (str, optional): Data to pipe to stdin for interactive commands.
+        site (str, optional): Site context for background threads.
     """
+    import pty
+    import select
+    import errno
+
+    try:
+        has_context = bool(getattr(frappe.local, "conf", None))
+    except Exception:
+        has_context = False
+        frappe.local.flags = frappe._dict()
+
+    if not has_context:
+        current_site = site or getattr(frappe.local, "site", None)
+        if current_site:
+            try:
+                frappe.init(current_site)
+                frappe.connect()
+                if user:
+                    frappe.set_user(user)
+            except Exception as e:
+                with open("/tmp/bench_mgr_thread_err.log", "a") as f:
+                    f.write(f"Context init error: {e}\n")
+
+    if not user:
+        try:
+            user = frappe.session.user if frappe.has_active_session() else "Administrator"
+        except Exception:
+            user = "Administrator"
+
     if bench_path is None:
+        from bench_manager.api import get_bench_path
         bench_path = get_bench_path()
 
-    cmd = ["bench"] + command_parts
-    command_str = " ".join(cmd)
+    bench_exec = shutil.which("bench")
+    if not bench_exec:
+        bench_exec = "bench"
+
+    cmd = [bench_exec] + command_parts
+    command_str = " ".join(["bench"] + command_parts)
 
     frappe.logger("bench_manager").info(f"Executing: {command_str}")
 
+    def _publish(msg, msg_type="stdout"):
+        """Publish realtime message reliably from thread context."""
+        if not realtime:
+            return
+        
+        # Log to file for debugging
+        with open("/tmp/bench_mgr_pub.log", "a") as f:
+            f.write(f"[{msg_type}] {msg}\n")
+            
+        try:
+            frappe.publish_realtime(
+                "bench_console",
+                {"message": msg, "msg_type": msg_type},
+                room="all",
+                after_commit=False,
+            )
+        except Exception as e:
+            with open("/tmp/bench_mgr_thread_err.log", "a") as f:
+                f.write(f"Publish error: {e}\n")
+            # Fallback: publish via Redis directly
+            try:
+                import json as _json
+                r = frappe.cache()
+                r.publish(
+                    "events",
+                    _json.dumps({
+                        "event": "bench_console",
+                        "message": {"message": msg, "msg_type": msg_type},
+                        "room": "all",
+                        "namespace": getattr(frappe.local, "site", None)
+                    }),
+                )
+            except Exception as e2:
+                with open("/tmp/bench_mgr_thread_err.log", "a") as f:
+                    f.write(f"Redis error: {e2}\n")
+
     if realtime:
-        frappe.publish_realtime(
-            "bench_console",
-            {"message": f"$ {command_str}", "msg_type": "command"},
-            user=frappe.session.user,
-        )
+        _publish(f"$ {command_str}", "command")
 
     try:
+        env = {
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "TERM": "xterm-256color",
+            "COLUMNS": "120",
+        }
+
+        master_fd, slave_fd = pty.openpty()
+
         process = subprocess.Popen(
             cmd,
             cwd=bench_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env={**os.environ, "TERM": "dumb"},
+            stdin=subprocess.PIPE if stdin_data else subprocess.DEVNULL,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            env=env,
         )
 
+        os.close(slave_fd)
+
+        if stdin_data and process.stdin:
+            process.stdin.write(stdin_data.encode() if isinstance(stdin_data, str) else stdin_data)
+            process.stdin.close()
+
         output_lines = []
-        if process.stdout:
-            for line in iter(process.stdout.readline, ""):
-                stripped = line.rstrip()
-                output_lines.append(stripped)
-                if realtime and stripped:
-                    frappe.publish_realtime(
-                        "bench_console",
-                        {"message": stripped, "msg_type": "stdout"},
-                        user=frappe.session.user,
-                    )
+        buffer = ""
 
-        process.wait(timeout=300)
-        error_output = process.stderr.read() if process.stderr else ""
+        # Read from PTY master until EIO (child closed its end).
+        # Do NOT use process.poll() — it causes a race where we
+        # break before reading all buffered PTY data.
+        ansi_re = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B")
 
-        if error_output and realtime:
-            for err_line in error_output.strip().split("\n"):
-                if err_line.strip():
-                    frappe.publish_realtime(
-                        "bench_console",
-                        {"message": err_line.strip(), "msg_type": "stderr"},
-                        user=frappe.session.user,
-                    )
+        while True:
+            try:
+                ready, _, _ = select.select([master_fd], [], [], 1.0)
+            except (ValueError, OSError):
+                break
+
+            if not ready:
+                # Safety: if process exited AND no data for 1s, we're done
+                if process.poll() is not None:
+                    break
+                continue
+
+            try:
+                data = os.read(master_fd, 4096)
+            except OSError as e:
+                if e.errno == errno.EIO:
+                    break  # Normal PTY EOF — all data has been read
+                raise
+
+            if not data:
+                break
+
+            text = data.decode("utf-8", errors="replace")
+            text = ansi_re.sub("", text)
+
+            for char in text:
+                if char in ("\n", "\r"):
+                    clean_msg = buffer.strip()
+                    if clean_msg:
+                        output_lines.append(clean_msg)
+                        _publish(clean_msg)
+                    buffer = ""
+                else:
+                    buffer += char
+
+        # Flush remaining buffer
+        if buffer.strip():
+            output_lines.append(buffer.strip())
+            _publish(buffer.strip())
+
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        process.wait(timeout=600)
 
         full_output = "\n".join(output_lines)
         status = "Success" if process.returncode == 0 else "Failed"
 
-        log_command(command_str, full_output, error_output, status)
+        log_command(command_str, full_output, "", status, user)
 
         if realtime:
-            frappe.publish_realtime(
-                "bench_console",
-                {
-                    "message": f"Command {'completed successfully' if status == 'Success' else 'failed'}",
-                    "msg_type": "success" if status == "Success" else "error",
-                },
-                user=frappe.session.user,
+            _publish(
+                f"Command {'completed successfully' if status == 'Success' else 'failed'}",
+                "success" if status == "Success" else "error"
             )
 
         return {
             "output": full_output,
-            "error": error_output,
+            "error": "",
             "returncode": process.returncode,
         }
 
     except subprocess.TimeoutExpired:
         process.kill()
-        log_command(command_str, "", "Command timed out after 300 seconds", "Failed")
+        log_command(command_str, "", "Command timed out after 600 seconds", "Failed", user)
         if realtime:
-            frappe.publish_realtime(
-                "bench_console",
-                {"message": "Command timed out after 300 seconds", "msg_type": "error"},
-                user=frappe.session.user,
-            )
-        frappe.throw("Command timed out after 300 seconds")
+            _publish("Command timed out after 600 seconds", "error")
+        frappe.throw("Command timed out after 600 seconds")
 
     except Exception as e:
         error_msg = str(e)
-        log_command(command_str, "", error_msg, "Failed")
+        log_command(command_str, "", error_msg, "Failed", user)
         frappe.logger("bench_manager").error(f"Command failed: {error_msg}")
         if realtime:
-            frappe.publish_realtime(
-                "bench_console",
-                {"message": f"Error: {error_msg}", "msg_type": "error"},
-                user=frappe.session.user,
-            )
+            _publish(f"Error: {error_msg}", "error")
         frappe.throw(f"Command execution failed: {error_msg}")
 
 
-def log_command(command, output="", error="", status="Success"):
+def log_command(command, output="", error="", status="Success", user="Administrator"):
     """Log a bench command execution to the Bench Command Log DocType.
 
     Args:
@@ -248,6 +352,7 @@ def log_command(command, output="", error="", status="Success"):
         output (str): Standard output from the command.
         error (str): Standard error from the command.
         status (str): Execution status - Success, Failed, or Running.
+        user (str): User who initiated the command.
     """
     try:
         log = frappe.get_doc(
@@ -257,7 +362,7 @@ def log_command(command, output="", error="", status="Success"):
                 "output": output[:50000] if output else "",
                 "error": error[:10000] if error else "",
                 "status": status,
-                "executed_by": frappe.session.user,
+                "executed_by": user,
             }
         )
         log.insert(ignore_permissions=True)

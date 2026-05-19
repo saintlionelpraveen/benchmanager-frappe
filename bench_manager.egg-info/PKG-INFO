@@ -1,0 +1,41 @@
+Metadata-Version: 2.4
+Name: bench_manager
+Version: 0.0.1
+Summary: A Frappe app to manage Bench operations via GUI
+Author: Praveen
+Author-email: Praveen <admin@example.com>
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Dynamic: author
+
+# Bench Manager
+
+A Frappe custom app that provides a full GUI inside Frappe Desk to manage Frappe Bench — replacing all terminal commands with a clean UI.
+
+## Features
+
+- **Site Management**: Create, delete, migrate, backup sites. Toggle maintenance mode.
+- **App Management**: Create new apps, install from GitHub, install/uninstall on sites.
+- **Bench Management**: View bench status, version info, run migrations.
+- **Real-Time Logs**: Live streaming of command output with color-coded status.
+
+## Installation
+
+```bash
+cd /path/to/frappe-bench
+bench get-app ./apps/bench_manager
+bench --site your-site install-app bench_manager
+bench migrate
+```
+
+## Usage
+
+Navigate to `/app/bench-dashboard` in your Frappe Desk.
+
+## Permissions
+
+Only users with the **System Manager** role can access Bench Manager.
+
+## License
+
+MIT

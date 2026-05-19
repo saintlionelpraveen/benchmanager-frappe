@@ -1,0 +1,46 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"header1\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Bench Operations</span>\",\"col\":12}},{\"id\":\"shortcut1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Bench Dashboard\",\"col\":5}}]",
+ "creation": "2026-05-10 16:05:43.201972",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Bench Manager",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bench Dashboard",
+   "link_count": 0,
+   "link_to": "bench-dashboard",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-05-12 16:49:20.836516",
+ "modified_by": "Administrator",
+ "module": "Bench Manager",
+ "name": "Bench Manager",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Bench Dashboard",
+   "link_to": "bench-dashboard",
+   "type": "Page"
+  }
+ ],
+ "title": "Bench Manager"
+}
