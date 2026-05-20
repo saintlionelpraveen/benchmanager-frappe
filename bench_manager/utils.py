@@ -193,14 +193,21 @@ def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, 
     frappe.logger("bench_manager").info(f"Executing: {command_str}")
 
     def _publish(msg, msg_type="stdout"):
-        """Publish realtime message reliably from thread context."""
+        """Publish realtime message reliably from thread context.
+        Dual-publishes via both Socket.IO (frappe.publish_realtime)
+        and the in-memory SSE buffer for zero-latency live logs.
+        """
         if not realtime:
             return
-        
-        # Log to file for debugging
-        with open("/tmp/bench_mgr_pub.log", "a") as f:
-            f.write(f"[{msg_type}] {msg}\n")
-            
+
+        # 1. Push to SSE buffer (always works, even without Socket.IO)
+        try:
+            from bench_manager.api import push_sse_event
+            push_sse_event(msg, msg_type)
+        except Exception:
+            pass
+
+        # 2. Publish via Socket.IO (frappe.publish_realtime)
         try:
             frappe.publish_realtime(
                 "bench_console",
@@ -209,8 +216,6 @@ def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, 
                 after_commit=False,
             )
         except Exception as e:
-            with open("/tmp/bench_mgr_thread_err.log", "a") as f:
-                f.write(f"Publish error: {e}\n")
             # Fallback: publish via Redis directly
             try:
                 import json as _json
@@ -224,9 +229,8 @@ def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, 
                         "namespace": getattr(frappe.local, "site", None)
                     }),
                 )
-            except Exception as e2:
-                with open("/tmp/bench_mgr_thread_err.log", "a") as f:
-                    f.write(f"Redis error: {e2}\n")
+            except Exception:
+                pass
 
     if realtime:
         _publish(f"$ {command_str}", "command")
