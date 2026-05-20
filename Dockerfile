@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 USER frappe
 WORKDIR /home/frappe/frappe-bench
 
-COPY --chown=frappe:frappe bench_manager apps/bench_manager/
+COPY --chown=frappe:frappe . apps/bench_manager/
 
 RUN /home/frappe/frappe-bench/env/bin/pip install --no-cache-dir -e apps/bench_manager \
     && echo "bench_manager" >> sites/apps.txt

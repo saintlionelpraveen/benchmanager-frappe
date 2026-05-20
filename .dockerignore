@@ -1,0 +1,13 @@
+.git
+.github
+*.pyc
+__pycache__
+*.egg-info
+.env
+docker-compose.yml
+.dockerignore
+README.md
+*.md
+.vscode
+.idea
+node_modules
