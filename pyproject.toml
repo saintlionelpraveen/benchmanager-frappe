@@ -1,15 +1,15 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "bench_manager"
+version = "0.0.1"
+description = "A Frappe app to manage Bench operations via GUI"
 authors = [
     { name = "Praveen", email = "admin@example.com" }
 ]
-description = "A Frappe app to manage Bench operations via GUI"
 requires-python = ">=3.10"
 readme = "README.md"
-version = "0.0.1"
-
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
 
 [tool.bench.frappe-app]
