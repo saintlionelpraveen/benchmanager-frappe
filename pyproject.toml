@@ -6,7 +6,7 @@ authors = [
 description = "A Frappe app to manage Bench operations via GUI"
 requires-python = ">=3.10"
 readme = "README.md"
-dynamic = ["version"]
+version = "0.0.1"
 
 [build-system]
 requires = ["setuptools"]
