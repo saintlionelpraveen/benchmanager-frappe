@@ -5,9 +5,11 @@ __pycache__
 *.egg-info
 .env
 docker-compose.yml
+docker-compose-one-step.yml
 .dockerignore
-README.md
-*.md
+Dockerfile
 .vscode
 .idea
 node_modules
+deploy.sh
+install.sh

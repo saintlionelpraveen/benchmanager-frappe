@@ -20,7 +20,10 @@ WORKDIR /home/frappe/frappe-bench
 
 COPY --chown=frappe:frappe . apps/bench_manager/
 
-RUN /home/frappe/frappe-bench/env/bin/pip install --no-cache-dir -e apps/bench_manager \
+RUN ls -la apps/bench_manager/ && \
+    cat apps/bench_manager/pyproject.toml && \
+    /home/frappe/frappe-bench/env/bin/pip install --no-cache-dir setuptools wheel && \
+    /home/frappe/frappe-bench/env/bin/pip install --no-cache-dir -e apps/bench_manager \
     && echo "bench_manager" >> sites/apps.txt
 
 RUN cd apps/frappe && yarn --frozen-lockfile 2>/dev/null || yarn \
