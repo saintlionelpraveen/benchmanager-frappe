@@ -77,6 +77,7 @@ class BenchDashboard {
 		this.setup_bench_actions();
 		this.setup_log_actions();
 		this.setup_benches_actions();
+		this.setup_vscode_actions();
 		this.load_status();
 		this.load_benches();
 		this.populate_context_selector();
@@ -99,6 +100,7 @@ class BenchDashboard {
 			else if (tab === 'benches') self.load_benches();
 			else if (tab === 'bench') self.load_bench_info();
 			else if (tab === 'logs') self.load_logs();
+			else if (tab === 'vscode') self.load_vscode_instances();
 		});
 	}
 
@@ -2062,8 +2064,27 @@ class BenchDashboard {
 		});
 	}
 
+	// Helper: Show error in the VS Code blob tab (safe for cross-origin)
+	_showEditorTabError(tab, message) {
+		try {
+			if (tab && !tab.closed) {
+				tab.document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a1a;margin:0;">
+					<h2 style="color:#ff6b6b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:400;font-size:16px;text-align:center;max-width:500px;line-height:1.6;">${message}</h2>
+				</div>`;
+			}
+		} catch (e) {
+			// Cross-origin or tab already navigated — just try to close
+			try { if (tab && !tab.closed) tab.close(); } catch (_) {}
+		}
+	}
+
 	setup_bench_actions() {
 		const self = this;
+
+		this.$container.find('#btn-launch-vscode').on('click', (e) => {
+			if (!this.current_bench_path) return;
+			this.launch_vscode_with_button(this.current_bench_path, $(e.currentTarget));
+		});
 
 		this.$container.find('#btn-bench-update').on('click', () => {
 			frappe.confirm('Run <strong>bench update</strong>? This will update all apps.', () => {
@@ -2158,6 +2179,247 @@ class BenchDashboard {
 					},
 				});
 			});
+		});
+	}
+
+	// ─── VS Code Tab ─────────────────────────────────────────────
+
+	load_vscode_instances() {
+		const $wrapper = this.$container.find('#vscode-table-wrapper');
+		$wrapper.html(`
+			<div class="loading-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%;">
+				<svg width="32" height="32" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="animation: pulse 2s infinite; opacity: 0.7;">
+					<mask id="vsc-mask-load" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+						<path d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130279 71.3446 0.115699 69.5135 1.44695L31.5418 33.4462L13.0853 19.5516C11.5478 18.3589 9.39544 18.4343 7.94345 19.7344L1.59371 25.5899C-0.138163 27.1527 -0.142613 29.8983 1.58412 31.4663L17.5753 45.8662L1.58412 60.2661C-0.142613 61.8341 -0.138163 64.5797 1.59371 66.1425L7.94345 71.998C9.39544 73.2981 11.5478 73.3735 13.0853 72.1808L31.5418 58.2862L69.5135 90.2854C69.9254 90.6397 70.3978 90.9235 70.9119 91.1154V99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+					</mask>
+					<g mask="url(#vsc-mask-load)">
+						<path d="M96.4614 10.7962L75.8569 0.875542C73.4719 -0.272773 70.6217 0.211611 68.75 2.08333L1.29858 60.5765C-0.461825 62.1263 -0.421669 64.8866 1.38437 66.3893L7.81485 72.0865C9.28045 73.3626 11.4057 73.4104 12.9222 72.1979L91.1324 11.2015C93.9567 9.01654 98 11.0387 98 14.5789V14.4275C98 12.0243 96.6244 9.83383 94.4614 8.79288L96.4614 10.7962Z" fill="currentColor"/>
+						<g filter="url(#vsc-shadow-load)">
+							<path d="M96.4614 89.2038L75.8569 99.1245C73.4719 100.273 70.6217 99.7884 68.75 97.9167L1.29858 39.4235C-0.461825 37.8737 -0.421669 35.1134 1.38437 33.6107L7.81485 27.9135C9.28045 26.6374 11.4057 26.5896 12.9222 27.8021L91.1324 88.7985C93.9567 90.9835 98 88.9613 98 85.4211V85.5725C98 87.9757 96.6244 90.1662 94.4614 91.2071L96.4614 89.2038Z" fill="currentColor"/>
+						</g>
+						<g filter="url(#vsc-shadow2-load)">
+							<path d="M75.8578 99.1263C73.4721 100.274 70.6219 99.7885 68.75 97.9166C71.0564 100.223 75 98.5895 75 95.3278V4.67213C75 1.41039 71.0564 -0.223106 68.75 2.08329C70.6219 0.211402 73.4721 -0.273666 75.8578 0.87367L96.4587 10.7804C98.6234 11.8218 100 14.0114 100 16.4134V83.5866C100 85.9886 98.6234 88.1782 96.4587 89.2196L75.8578 99.1263Z" fill="currentColor"/>
+						</g>
+						<rect x="0" y="0" width="100" height="100" fill="url(#vsc-gradient-load)" opacity="0.25"/>
+					</g>
+					<defs>
+						<filter id="vsc-shadow-load"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
+						<filter id="vsc-shadow2-load"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
+						<linearGradient id="vsc-gradient-load" x1="50" y1="0" x2="50" y2="100" gradientUnits="userSpaceOnUse"><stop stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
+					</defs>
+				</svg>
+				<span>Loading editors...</span>
+			</div>
+		`);
+
+		frappe.call({
+			method: 'bench_manager.api.get_running_vscode_instances',
+			callback: (r) => {
+				const instances = r.message || [];
+				if (instances.length) {
+					this.render_vscode_instances(instances);
+				} else {
+					$wrapper.html(`
+						<div class="empty-state">
+							<img src="/assets/bench_manager/images/empty_benches.png" alt="No VS Code instances" style="max-width: 140px; margin-bottom: 20px;">
+							<p>No VS Code instances running.</p>
+						</div>
+					`);
+				}
+			}
+		});
+	}
+
+	render_vscode_instances(instances) {
+		const $wrapper = this.$container.find('#vscode-table-wrapper');
+		let html = `<table class="bench-table">
+			<thead><tr>
+				<th>Bench</th><th>Port</th><th>PID</th><th>Status</th><th>Actions</th>
+			</tr></thead><tbody>`;
+
+		instances.forEach((inst) => {
+			let dynamicUrl = inst.url;
+			if (dynamicUrl) {
+				try {
+					let urlObj = new URL(dynamicUrl);
+					if (['127.0.0.1', 'localhost', '0.0.0.0'].includes(urlObj.hostname)) {
+						urlObj.hostname = window.location.hostname;
+						dynamicUrl = urlObj.toString();
+					}
+				} catch (e) {}
+			}
+			html += `<tr>
+				<td>
+					<div style="display:flex;flex-direction:column;gap:3px;">
+						<strong>${frappe.utils.escape_html(inst.bench_name)}</strong>
+						<small style="color:var(--text-muted);">${frappe.utils.escape_html(inst.bench_path)}</small>
+					</div>
+				</td>
+				<td><span class="badge-source badge-source-git" style="background:#f1f5f9;color:#475569;border-color:#e2e8f0;font-family:monospace;">${inst.port}</span></td>
+				<td><small>${inst.pid}</small></td>
+				<td><span class="badge-status badge-success" style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;"></span> Running</span></td>
+				<td>
+					<div style="display:flex;gap:8px;">
+						<a href="${dynamicUrl}" target="_blank" class="btn btn-xs btn-primary" style="padding:4px 10px;">Open</a>
+						<button class="btn btn-xs btn-danger btn-stop-vscode" data-pid="${inst.pid}" style="padding:4px 10px;">Stop</button>
+					</div>
+				</td>
+			</tr>`;
+		});
+
+		html += '</tbody></table>';
+		$wrapper.html(html);
+
+		// Bind actions
+		$wrapper.find('.btn-stop-vscode').on('click', (e) => {
+			const pid = $(e.currentTarget).data('pid');
+			frappe.confirm('Stop this VS Code editor?', () => {
+				frappe.call({
+					method: 'bench_manager.api.stop_code_server',
+					args: { pid: pid },
+					callback: (r) => {
+						if (r.message && r.message.status === 'success') {
+							frappe.show_alert({ message: r.message.message, indicator: 'green' });
+							this.load_vscode_instances();
+						} else {
+							frappe.show_alert({ message: r.message ? r.message.message : 'Error stopping editor', indicator: 'red' });
+						}
+					}
+				});
+			});
+		});
+	}
+
+	setup_vscode_actions() {
+		const self = this;
+		
+		this.$container.find('#btn-refresh-vscode').on('click', () => self.load_vscode_instances());
+
+		// Populate the bench dropdown for VS Code from existing context selector
+		const populate_dropdown = () => {
+			const $source = self.$container.find('#bench-context-select');
+			const $target = self.$container.find('#vscode-bench-select');
+			if ($source.find('option').length > 1 || ($source.find('option').length === 1 && $source.find('option').val() !== 'default')) {
+				$target.html($source.html());
+			}
+		};
+
+		// Run when tabs are clicked to ensure dropdown is up-to-date
+		this.$container.find('.bench-tab[data-tab="vscode"]').on('click', populate_dropdown);
+
+		this.$container.find('#btn-launch-vscode-new').on('click', (e) => {
+			const benchPath = self.$container.find('#vscode-bench-select').val();
+			if (!benchPath || benchPath === 'default') {
+				frappe.msgprint('Please select a bench first.');
+				return;
+			}
+			self.launch_vscode_with_button(benchPath, $(e.currentTarget));
+		});
+	}
+
+	launch_vscode_with_button(benchPath, $btn) {
+		if (!benchPath) return;
+		if ($btn.hasClass('vscode-loading')) return;
+		
+		$btn.addClass('vscode-loading');
+		
+		const $wrapper = this.$container.find('#vscode-table-wrapper');
+		$wrapper.html(`
+			<div style="padding: 80px 20px; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center;">
+				<div class="vscode-launch-btn vscode-loading" style="margin-bottom: 20px; pointer-events: none; border-color: transparent;">
+					<svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<mask id="vsc-mask-launch" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+							<path d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130279 71.3446 0.115699 69.5135 1.44695L31.5418 33.4462L13.0853 19.5516C11.5478 18.3589 9.39544 18.4343 7.94345 19.7344L1.59371 25.5899C-0.138163 27.1527 -0.142613 29.8983 1.58412 31.4663L17.5753 45.8662L1.58412 60.2661C-0.142613 61.8341 -0.138163 64.5797 1.59371 66.1425L7.94345 71.998C9.39544 73.2981 11.5478 73.3735 13.0853 72.1808L31.5418 58.2862L69.5135 90.2854C69.9254 90.6397 70.3978 90.9235 70.9119 91.1154V99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+						</mask>
+						<g mask="url(#vsc-mask-launch)">
+							<path d="M96.4614 10.7962L75.8569 0.875542C73.4719 -0.272773 70.6217 0.211611 68.75 2.08333L1.29858 60.5765C-0.461825 62.1263 -0.421669 64.8866 1.38437 66.3893L7.81485 72.0865C9.28045 73.3626 11.4057 73.4104 12.9222 72.1979L91.1324 11.2015C93.9567 9.01654 98 11.0387 98 14.5789V14.4275C98 12.0243 96.6244 9.83383 94.4614 8.79288L96.4614 10.7962Z" fill="currentColor"/>
+							<g filter="url(#vsc-shadow-launch)">
+								<path d="M96.4614 89.2038L75.8569 99.1245C73.4719 100.273 70.6217 99.7884 68.75 97.9167L1.29858 39.4235C-0.461825 37.8737 -0.421669 35.1134 1.38437 33.6107L7.81485 27.9135C9.28045 26.6374 11.4057 26.5896 12.9222 27.8021L91.1324 88.7985C93.9567 90.9835 98 88.9613 98 85.4211V85.5725C98 87.9757 96.6244 90.1662 94.4614 91.2071L96.4614 89.2038Z" fill="currentColor"/>
+							</g>
+							<g filter="url(#vsc-shadow2-launch)">
+								<path d="M75.8578 99.1263C73.4721 100.274 70.6219 99.7885 68.75 97.9166C71.0564 100.223 75 98.5895 75 95.3278V4.67213C75 1.41039 71.0564 -0.223106 68.75 2.08329C70.6219 0.211402 73.4721 -0.273666 75.8578 0.87367L96.4587 10.7804C98.6234 11.8218 100 14.0114 100 16.4134V83.5866C100 85.9886 98.6234 88.1782 96.4587 89.2196L75.8578 99.1263Z" fill="currentColor"/>
+							</g>
+							<rect x="0" y="0" width="100" height="100" fill="url(#vsc-gradient-launch)" opacity="0.25"/>
+						</g>
+						<defs>
+							<filter id="vsc-shadow-launch"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
+							<filter id="vsc-shadow2-launch"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
+							<linearGradient id="vsc-gradient-launch" x1="50" y1="0" x2="50" y2="100" gradientUnits="userSpaceOnUse"><stop stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
+						</defs>
+					</svg>
+				</div>
+				<div style="font-size: 16px; font-weight: 600; color: var(--text-color);">Starting VS Code Editor...</div>
+				<div style="font-size: 13px; margin-top: 6px; opacity: 0.8;">Configuring environment and establishing connection</div>
+			</div>
+		`);
+
+		frappe.call({
+			method: 'bench_manager.api.launch_code_server',
+			args: { bench_path: benchPath },
+			callback: (r) => {
+				if (!r.message) {
+					$btn.removeClass('vscode-loading');
+					this.load_vscode_instances && this.load_vscode_instances();
+					frappe.msgprint({ title: 'Error', message: 'No response from server.', indicator: 'red' });
+					return;
+				}
+				const res = r.message;
+
+				if (res.status === 'already_running') {
+					$btn.removeClass('vscode-loading');
+					this.load_vscode_instances && this.load_vscode_instances();
+				} else if (res.status === 'launching') {
+					const pollPort = res.port;
+					let attempts = 0;
+					const maxAttempts = 30;
+
+					const pollReady = () => {
+						attempts++;
+						frappe.call({
+							method: 'bench_manager.api.check_code_server_status',
+							args: { port: pollPort },
+							callback: (pr) => {
+								if (pr.message && pr.message.running) {
+									$btn.removeClass('vscode-loading');
+									this.load_vscode_instances && this.load_vscode_instances();
+								} else if (attempts < maxAttempts) {
+									setTimeout(pollReady, 1500);
+								} else {
+									$btn.removeClass('vscode-loading');
+									this.load_vscode_instances && this.load_vscode_instances();
+									frappe.msgprint({ title: 'Timeout', message: 'Startup Timeout. Please try again.', indicator: 'orange' });
+								}
+							},
+							error: () => {
+								if (attempts < maxAttempts) {
+									setTimeout(pollReady, 1500);
+								} else {
+									$btn.removeClass('vscode-loading');
+									this.load_vscode_instances && this.load_vscode_instances();
+								}
+							}
+						});
+					};
+					setTimeout(pollReady, 1500);
+				} else if (res.status === 'not_installed') {
+					$btn.removeClass('vscode-loading');
+					this.load_vscode_instances && this.load_vscode_instances();
+					frappe.msgprint({
+						title: 'VS Code Not Installed',
+						message: res.message.replace(/\n/g, '<br>'),
+						indicator: 'orange'
+					});
+				} else {
+					$btn.removeClass('vscode-loading');
+					this.load_vscode_instances && this.load_vscode_instances();
+					frappe.msgprint({ title: 'Error', message: res.message, indicator: 'red' });
+				}
+			},
+			error: () => {
+				$btn.removeClass('vscode-loading');
+				this.load_vscode_instances && this.load_vscode_instances();
+				frappe.msgprint({ title: 'Error', message: 'Failed to reach the server.', indicator: 'red' });
+			}
 		});
 	}
 }

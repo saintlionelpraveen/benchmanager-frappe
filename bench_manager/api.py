@@ -2378,3 +2378,275 @@ def stream_bench_log(bench_path, lines=50):
             }
     except Exception as e:
         return {"content": f"Error reading log: {e}", "exists": True, "lines": 0}
+
+
+# ─── VS Code Editor (code-server) ──────────────────────────────────
+
+
+@frappe.whitelist()
+def get_running_vscode_instances():
+    """Get all running code-server instances on the host."""
+    frappe.only_for("System Manager")
+    
+    instances = []
+    try:
+        import subprocess
+        result = subprocess.run(["ps", "-eo", "pid,command"], capture_output=True, text=True)
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "code-server" in line and "--bind-addr" in line:
+                    parts = line.strip().split(maxsplit=1)
+                    if len(parts) == 2:
+                        pid_str, cmd = parts
+                        pid = int(pid_str)
+                        port = None
+                        bench_path = None
+                        
+                        cmd_parts = cmd.split()
+                        for i, part in enumerate(cmd_parts):
+                            if part == "--bind-addr" and i + 1 < len(cmd_parts):
+                                addr = cmd_parts[i+1]
+                                if ":" in addr:
+                                    port = int(addr.split(":")[1])
+                        
+                        if cmd_parts:
+                            bench_path = cmd_parts[-1]
+                        
+                        if port and bench_path and not bench_path.startswith("-"):
+                            bench_name = os.path.basename(bench_path)
+                            host = frappe.utils.get_url().split('//')[-1].split(':')[0]
+                            if host in ["localhost", "127.0.0.1", "0.0.0.0"]:
+                                host = "127.0.0.1" # fallback to be replaced by frontend
+                            instances.append({
+                                "pid": pid,
+                                "port": port,
+                                "bench_path": bench_path,
+                                "bench_name": bench_name,
+                                "url": f"http://{host}:{port}/?folder={bench_path}",
+                                "status": "running"
+                            })
+    except Exception as e:
+        frappe.logger("bench_manager").error(f"Error fetching vscode instances: {e}")
+    
+    return instances
+
+
+@frappe.whitelist()
+def stop_code_server(pid):
+    """Stop a running code-server instance by PID."""
+    frappe.only_for("System Manager")
+    
+    try:
+        pid = int(pid)
+        os.kill(pid, 9)
+        return {"status": "success", "message": f"VS Code editor stopped successfully (PID: {pid})."}
+    except ProcessLookupError:
+        return {"status": "success", "message": f"VS Code editor (PID: {pid}) was already stopped."}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to stop VS Code editor: {e}"}
+
+
+@frappe.whitelist()
+def launch_code_server(bench_path, port=9002):
+    """Launch code-server (VS Code in browser) for a given bench directory.
+
+    Starts code-server bound to 127.0.0.1 on the specified port, opening
+    the bench directory as the workspace. Requires code-server to be
+    installed on the system.
+
+    Args:
+        bench_path (str): Path to the bench directory to open.
+        port (int): Port to run code-server on (1024-65535). Defaults to 9002.
+
+    Returns:
+        dict: Status and URL to access the editor.
+    """
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+
+    # Check if this bench is already running a code-server
+    running_instances = get_running_vscode_instances()
+    for instance in running_instances:
+        if instance["bench_path"] == bench_path:
+            return {
+                "status": "already_running",
+                "message": f"Editor is already running for {instance['bench_name']}.",
+                "url": instance["url"],
+                "port": instance["port"],
+                "pid": instance["pid"]
+            }
+
+    # Find an available port if default is taken or not specified properly
+    import socket
+    
+    def is_port_in_use(p):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("0.0.0.0", p))
+                return False
+            except socket.error:
+                return True
+            
+    try:
+        port = int(port)
+    except (ValueError, TypeError):
+        port = 9002
+        
+    if port < 1024 or port > 65535:
+        port = 9002
+
+    while is_port_in_use(port) and port < 9100:
+        port += 1
+        
+    if port >= 9100:
+         return {
+            "status": "error",
+            "message": "Could not find an available port for code-server.",
+         }
+
+    # Check if code-server is installed
+    code_server_exec = shutil.which("code-server")
+    if not code_server_exec:
+        local_bin_path = os.path.expanduser("~/.local/bin/code-server")
+        if os.path.exists(local_bin_path):
+            code_server_exec = local_bin_path
+        else:
+            return {
+                "status": "not_installed",
+                "message": (
+                    "code-server is not installed. Install it with:\n"
+                    "curl -fsSL https://code-server.dev/install.sh | sh"
+                ),
+            }
+
+    user_data_dir = os.path.join(bench_path, ".vscode-server-data")
+    
+    # Use --config /dev/null to prevent ~/.config/code-server/config.yaml
+    # from overriding CLI args (e.g. bind-addr, auth)
+    cmd = [
+        code_server_exec,
+        "--config", "/dev/null",
+        "--bind-addr", f"0.0.0.0:{port}",
+        "--auth", "none",
+        "--disable-telemetry",
+        "--user-data-dir", user_data_dir,
+        bench_path,
+    ]
+
+    env = os.environ.copy()
+    # Strip VS Code / Electron env vars that cause code-server to detect
+    # the running IDE and delegate to it via IPC socket (then exit silently)
+    for key in list(env.keys()):
+        if (
+            key.startswith("VSCODE_")
+            or key.startswith("ELECTRON_")
+            or key == "TERM_PROGRAM"
+            or key == "PORT"
+        ):
+            del env[key]
+
+    local_bin = os.path.expanduser("~/.local/bin")
+    if local_bin not in env.get("PATH", ""):
+        env["PATH"] = local_bin + ":" + env.get("PATH", "/usr/bin")
+
+    import tempfile
+    stderr_path = os.path.join(
+        tempfile.gettempdir(), f"code-server-{port}-stderr.log"
+    )
+
+    try:
+        stderr_file = open(stderr_path, "w")
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+            env=env,
+        )
+
+        # Brief check: wait a moment to see if the process exited immediately
+        # (e.g. due to IPC delegation to an existing VS Code instance)
+        time.sleep(2)
+        exit_code = process.poll()
+        if exit_code is not None:
+            stderr_file.close()
+            # Read stderr for diagnostics
+            stderr_output = ""
+            try:
+                with open(stderr_path, "r") as f:
+                    stderr_output = f.read(2000).strip()
+            except Exception:
+                pass
+
+            frappe.logger("bench_manager").warning(
+                f"code-server exited with code {exit_code}: {stderr_output}"
+            )
+            return {
+                "status": "error",
+                "message": (
+                    f"VS Code editor exited immediately (code {exit_code}). "
+                    f"{stderr_output or 'No error details available.'}"
+                ),
+            }
+
+        bench_name = os.path.basename(bench_path)
+        frappe.logger("bench_manager").info(
+            f"code-server launched for '{bench_name}' on port {port} (PID: {process.pid})"
+        )
+
+        host = frappe.utils.get_url().split('//')[-1].split(':')[0]
+        if host in ["localhost", "127.0.0.1", "0.0.0.0"]:
+            host = "127.0.0.1"
+
+        return {
+            "status": "launching",
+            "message": f"VS Code editor launching for '{bench_name}' on port {port}...",
+            "url": f"http://{host}:{port}/?folder={bench_path}",
+            "port": port,
+            "pid": process.pid,
+        }
+    except Exception as e:
+        frappe.logger("bench_manager").error(f"Failed to start code-server: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to start VS Code editor: {e}",
+        }
+
+@frappe.whitelist()
+def check_code_server_status(port=9002):
+    """Check if code-server is running on the given port.
+
+    Args:
+        port (int): Port to check. Defaults to 9002.
+
+    Returns:
+        dict: Running status, port, and URL.
+    """
+    frappe.only_for("System Manager")
+
+    try:
+        port = int(port)
+    except (ValueError, TypeError):
+        port = 9002
+
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(2)
+        try:
+            s.bind(("0.0.0.0", port))
+            is_running = False
+        except socket.error:
+            is_running = True
+
+    host = frappe.utils.get_url().split('//')[-1].split(':')[0]
+    if host in ["localhost", "127.0.0.1", "0.0.0.0"]:
+        host = "127.0.0.1"
+
+    return {
+        "running": is_running,
+        "port": port,
+        "url": f"http://{host}:{port}" if is_running else None,
+    }
+
