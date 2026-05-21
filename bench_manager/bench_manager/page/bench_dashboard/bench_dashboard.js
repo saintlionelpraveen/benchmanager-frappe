@@ -87,12 +87,30 @@ class BenchDashboard {
 
 	setup_tabs() {
 		const self = this;
+		let current_img = 1;
+		
+		this.$container.find('#btn-toggle-menu').on('click', function() {
+			self.$container.find('.bench-tabs').toggleClass('show');
+		});
+
 		this.$container.find('.bench-tab').on('click', function () {
+			self.$container.find('.bench-tabs').removeClass('show');
 			const tab = $(this).data('tab');
 			self.$container.find('.bench-tab').removeClass('active');
 			$(this).addClass('active');
 			self.$container.find('.tab-pane').removeClass('active');
 			self.$container.find(`#tab-${tab}`).addClass('active');
+
+			// Toggle header illustration
+			if (current_img === 1) {
+				self.$container.find('#header-ill-1').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
+				self.$container.find('#header-ill-2').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
+				current_img = 2;
+			} else {
+				self.$container.find('#header-ill-1').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
+				self.$container.find('#header-ill-2').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
+				current_img = 1;
+			}
 
 			// Load data for selected tab
 			if (tab === 'sites') self.load_sites();
