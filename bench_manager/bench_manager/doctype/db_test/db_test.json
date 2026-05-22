@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-05-22 12:44:06.947760",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "test_column",
+  "test"
+ ],
+ "fields": [
+  {
+   "fieldname": "test_column",
+   "fieldtype": "Column Break",
+   "label": "Test"
+  },
+  {
+   "fieldname": "test",
+   "fieldtype": "Attach",
+   "label": "Test"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-22 12:44:40.550129",
+ "modified_by": "Administrator",
+ "module": "Bench Manager",
+ "name": "db-test",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

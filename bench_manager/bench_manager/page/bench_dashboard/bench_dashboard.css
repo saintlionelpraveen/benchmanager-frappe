@@ -1,5 +1,12 @@
 /* ─── Bench Dashboard — Production Styles ────────────────────── */
 
+/* Force Frappe Page Container to 100% width */
+#page-bench-dashboard .container,
+#page-bench-dashboard .page-container {
+	max-width: 100% !important;
+	padding: 0 50px;
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 .bench-dashboard {
 	--bg-primary: #ffffff;
@@ -17,9 +24,11 @@
 	--danger-hover-bg: #fee2e2;
 	--danger-hover-text: #b91c1c;
 
-	max-width: 1200px;
-	margin: 0 auto;
-	padding: 20px;
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+	padding: 24px 0 20px 0;
+	box-sizing: border-box;
 	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	background-color: var(--bg-primary);
 	color: var(--text-color);
@@ -109,7 +118,7 @@
 	align-items: center;
 }
 
-.bench-header-actions .btn {
+.bench-header-actions .btn, .bench-action-btn {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -117,12 +126,13 @@
 	font-weight: 600;
 	font-size: 13px;
 	padding: 9px 16px;
+	width: fit-content;
 	transition: all 0.2s ease;
 }
 
 .bench-header-actions .btn:hover {
 	transform: translateY(-1px);
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+	box-shadow: 0 2px 8px rgba(52, 51, 51, 0.286);
 }
 
 /* ─── VS Code Launch Button ─────────────────────────────────── */
@@ -143,20 +153,28 @@
 	position: relative;
 	backdrop-filter: blur(16px) saturate(120%);
 	-webkit-backdrop-filter: blur(16px) saturate(120%);
-	box-shadow: 0 2px 8px rgba(38, 46, 159, 0.218), inset 0 1px 2px rgba(50, 51, 102, 0.437);
+	box-shadow: 0 2px 8px rgba(61, 66, 134, 0.218), inset 0 1px 2px rgba(104, 105, 200, 0.999);
 }
 
 .vscode-launch-btn:hover {
-	background: var(--primary);
-	color: var(--bg-primary);
-	border-color: var(--primary);
-	transform: translateY(-2px) scale(1.08);
-	box-shadow: 0 6px 20px rgba(34, 26, 149, 0.316);
+	background: var(--primary) !important;
+	color: var(--bg-primary) !important;
+	border-color: var(--primary) !important;
+	transform: translateY(-2px) scale(1.05) !important;
+	box-shadow: 0 12px 24px rgba(38, 58, 100, 0.045), inset 0 -2px 6px rgba(54, 53, 104, 0.621), inset 0 2px 6px rgb(91, 82, 188) !important;
+}
+
+[data-theme="dark"] .vscode-launch-btn:hover {
+	box-shadow: 0 12px 24px rgba(0, 0, 0, 0.6), inset 0 -2px 6px rgba(0, 0, 0, 0.1), inset 0 2px 6px rgba(255, 255, 255, 0.6) !important;
+}
+
+.vscode-launch-btn:hover svg {
+	transform: scale(1.05);
 }
 
 .vscode-launch-btn:active {
-	transform: translateY(0) scale(0.96);
-	box-shadow: 0 1px 4px rgba(28, 31, 112, 0.1);
+	transform: translateY(0) scale(0.96) !important;
+	box-shadow: 0 2px 8px rgba(17, 24, 39, 0.2), inset 0 4px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
 .vscode-launch-btn svg {
@@ -281,11 +299,11 @@
 	line-height: 1.1;
 }
 
-/* ─── Main Layout & Tabs ────────────────────────────────────── */
+/* ─── Main Content Layout ──────────────────────────────────────── */
 
 .bench-main-layout {
 	display: flex;
-	gap: 32px;
+	gap: 30px;
 	align-items: stretch;
 }
 
@@ -293,15 +311,15 @@
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
-	width: 220px;
+	width: 130px;
 	flex-shrink: 0;
-	padding-right: 16px;
+	padding-right: 12px;
 	border-right: 1px solid var(--border-color);
 }
 
 .flying-airplane-container {
 	margin-top: -90px;
-	margin-left: 170px;
+	margin-left: 100px;
 	display: flex;
 	justify-content: center;
 	padding-bottom: 30px;
@@ -327,16 +345,16 @@
 .bench-tab {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 12px 16px;
+	gap: 10px;
+	padding: 10px 12px;
 	border: none;
 	background: transparent;
 	color: var(--text-muted);
-	font-size: 14px;
+	font-size: 13px;
 	font-weight: 600;
 	cursor: pointer;
-	border-radius: 10px;
-	transition: all 0.2s ease;
+	border-radius: 8px;
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	text-align: left;
 }
 
@@ -374,7 +392,7 @@
 
 .tab-pane.active {
 	display: block;
-	animation: fadeInTab 0.25s ease;
+	animation: fadeInTab 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes fadeInTab {
@@ -382,33 +400,6 @@
 	to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Bench Context Indicator ────────────────────────────────── */
-
-.bench-context-indicator {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 8px 16px;
-	background: var(--bg-light-gray);
-	border: 1px solid var(--border-light);
-	border-radius: 8px;
-	color: var(--text-color);
-	font-size: 12px;
-	font-weight: 500;
-	margin-bottom: 20px;
-	backdrop-filter: blur(16px) saturate(120%);
-	-webkit-backdrop-filter: blur(16px) saturate(120%);
-	box-shadow: 0 3px 12px rgba(0, 0, 0, 0.04), inset 0 2px 4px rgba(255, 255, 255, 0.25), inset 0 -1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.bench-context-indicator svg {
-	color: var(--text-color);
-}
-
-.bench-context-indicator strong {
-	font-weight: 700;
-	color: var(--text-color);
-}
 
 /* ─── Tab Actions Bar ────────────────────────────────────────── */
 
@@ -1084,4 +1075,100 @@
 
 @keyframes spin-animation {
 	100% { transform: rotate(360deg); }
+}
+
+/* ─── Database Browser ────────────────────────────────────────── */
+
+.db-browser-container {
+	display: flex;
+	height: calc(100vh - 180px);
+	min-height: 500px;
+	background: var(--card-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 14px;
+	overflow: hidden;
+}
+
+.db-sidebar {
+	width: 260px;
+	border-right: 1px solid var(--border-color);
+	display: flex;
+	flex-direction: column;
+	background: var(--bg-primary);
+	transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.db-sidebar.collapsed {
+	width: 0;
+	border-right: none;
+}
+
+.db-sidebar-header {
+	padding: 16px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.db-table-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 8px 0;
+}
+
+.db-table-item {
+	padding: 8px 16px;
+	cursor: pointer;
+	font-size: 13px;
+	color: var(--text-color);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	transition: background 0.15s;
+}
+
+.db-table-item:hover {
+	background: var(--bg-light-gray);
+}
+
+.db-table-item.active {
+	background: var(--primary-light);
+	border-left: 3px solid var(--primary);
+	color: var(--primary);
+	font-weight: 600;
+}
+
+.db-table-size {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.db-main {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.db-main-header {
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--border-color);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	background: var(--bg-light-gray);
+}
+
+.db-content-area {
+	flex: 1;
+	overflow: auto;
+	padding: 0;
+	position: relative;
+}
+
+.db-placeholder {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
 }

@@ -33,6 +33,7 @@ RUN cd apps/frappe && yarn --frozen-lockfile 2>/dev/null || yarn \
     && echo "bench_manager" >> sites/apps.txt \
     && /home/frappe/frappe-bench/env/bin/python -m frappe.utils.bench_helper frappe build --app bench_manager 2>/dev/null \
     || echo "Asset build completed (or no custom assets to build)"
+RUN mkdir -p sites/assets/bench_manager/images && cp -R apps/bench_manager/bench_manager/public/images/* sites/assets/bench_manager/images/ 2>/dev/null || true
 
 
 # ---- Stage 2: All-in-One Production Image ----
@@ -59,6 +60,8 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     nginx \
     supervisor \
     curl \
+    cron \
+    && curl -fsSL https://code-server.dev/install.sh | sh \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nginx/sites-enabled/default \
     && mkdir -p /var/log/supervisor /var/run/supervisor
@@ -71,6 +74,26 @@ COPY --chmod=755 entrypoint-aio.sh /usr/local/bin/entrypoint.sh
 # Fix MariaDB socket directory
 RUN mkdir -p /run/mysqld && chown mysql:mysql /run/mysqld
 
+# Inject async wrapper for supervisorctl to prevent suicide during bench restart
+RUN mv /usr/bin/supervisorctl /usr/bin/supervisorctl.real && \
+    echo '#!/bin/bash' > /usr/bin/supervisorctl && \
+    echo 'if [ "$1" = "restart" ]; then' >> /usr/bin/supervisorctl && \
+    echo '    (sleep 2 && /usr/bin/supervisorctl.real "$@") >/dev/null 2>&1 &' >> /usr/bin/supervisorctl && \
+    echo '    disown' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-web: stopped"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-socketio: stopped"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-worker-long: stopped"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-scheduler: stopped"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-web: started"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-socketio: started"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-worker-long: started"' >> /usr/bin/supervisorctl && \
+    echo '    echo "frappe:frappe-scheduler: started"' >> /usr/bin/supervisorctl && \
+    echo '    exit 0' >> /usr/bin/supervisorctl && \
+    echo 'else' >> /usr/bin/supervisorctl && \
+    echo '    exec /usr/bin/supervisorctl.real "$@"' >> /usr/bin/supervisorctl && \
+    echo 'fi' >> /usr/bin/supervisorctl && \
+    chmod +x /usr/bin/supervisorctl
+
 USER frappe
 WORKDIR /home/frappe/frappe-bench
 
@@ -79,6 +102,10 @@ COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench/apps/bench_m
 COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench/env env/
 COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench/sites/apps.txt sites/apps.txt
 COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench/sites/assets sites/assets/
+
+# Patch api.py ONLY inside the image to use Nginx proxy path for code-server instead of local port
+RUN sed -i 's|"url": f"http://{host}:{port}/?folder={bench_path}"|"url": f"/vscode/{port}/?folder={bench_path}"|g' apps/bench_manager/bench_manager/api.py
+
 
 # Backup assets so they survive volume mounts
 RUN cp -r sites/assets assets_baked

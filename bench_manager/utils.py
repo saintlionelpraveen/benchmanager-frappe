@@ -241,6 +241,8 @@ def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, 
             "PYTHONUNBUFFERED": "1",
             "TERM": "xterm-256color",
             "COLUMNS": "120",
+            "HOME": "/home/frappe",
+            "USER": "frappe"
         }
 
         master_fd, slave_fd = pty.openpty()

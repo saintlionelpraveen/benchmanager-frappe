@@ -2534,6 +2534,8 @@ def launch_code_server(bench_path, port=9002):
     ]
 
     env = os.environ.copy()
+    env["HOME"] = "/home/frappe"
+    env["USER"] = "frappe"
     # Strip VS Code / Electron env vars that cause code-server to detect
     # the running IDE and delegate to it via IPC socket (then exit silently)
     for key in list(env.keys()):
@@ -2649,4 +2651,225 @@ def check_code_server_status(port=9002):
         "port": port,
         "url": f"http://{host}:{port}" if is_running else None,
     }
+
+# ─── Database Browser ──────────────────────────────────────────────
+
+def get_site_db_connection(bench_path, site_name):
+    import json
+    import os
+    import frappe
+    site_config_path = os.path.join(bench_path, "sites", site_name, "site_config.json")
+    if not os.path.exists(site_config_path):
+        frappe.throw(f"Site config not found for {site_name}")
+    
+    with open(site_config_path, "r") as f:
+        conf = json.load(f)
+    
+    import pymysql
+    conn = pymysql.connect(
+        host=conf.get("db_host", "127.0.0.1"),
+        port=conf.get("db_port", 3306),
+        user=conf.get("db_name"),
+        password=conf.get("db_password"),
+        database=conf.get("db_name"),
+        cursorclass=pymysql.cursors.DictCursor
+    )
+    return conn, conf.get("db_name")
+
+@frappe.whitelist()
+def get_database_tables(bench_path, site_name):
+    """Get list of tables for a specific site."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    
+    try:
+        conn, db_name = get_site_db_connection(bench_path, site_name)
+        with conn.cursor() as cursor:
+            sql = """
+                SELECT 
+                    TABLE_NAME as name, 
+                    TABLE_ROWS as `rows`, 
+                    DATA_LENGTH as size,
+                    CREATE_TIME as creation
+                FROM information_schema.tables 
+                WHERE table_schema = %s AND TABLE_TYPE = 'BASE TABLE'
+                ORDER BY TABLE_NAME ASC
+            """
+            cursor.execute(sql, (db_name,))
+            tables = cursor.fetchall()
+        conn.close()
+        
+        # Convert datetime objects to string for JSON serialization
+        for t in tables:
+            if t.get('creation'):
+                t['creation'] = str(t['creation'])
+                
+        return {"status": "success", "tables": tables}
+    except Exception as e:
+        frappe.log_error(f"Error fetching DB tables for {site_name}: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@frappe.whitelist()
+def get_table_schema(bench_path, site_name, table_name):
+    """Get column schema for a specific table."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    import re
+    if not re.match(r'^[a-zA-Z0-9_ \-\.]+$', table_name):
+        frappe.throw("Invalid table name")
+        
+    try:
+        conn, db_name = get_site_db_connection(bench_path, site_name)
+        with conn.cursor() as cursor:
+            sql = """
+                SELECT 
+                    COLUMN_NAME as Field, 
+                    COLUMN_TYPE as Type, 
+                    IS_NULLABLE as `Null`, 
+                    COLUMN_KEY as `Key`, 
+                    COLUMN_DEFAULT as `Default`, 
+                    EXTRA as Extra
+                FROM information_schema.columns 
+                WHERE table_schema = %s AND table_name = %s
+                ORDER BY ORDINAL_POSITION
+            """
+            cursor.execute(sql, (db_name, table_name))
+            schema = cursor.fetchall()
+        conn.close()
+        return {"status": "success", "schema": schema}
+    except Exception as e:
+        frappe.log_error(f"Error fetching schema for {table_name}: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@frappe.whitelist()
+def get_table_data(bench_path, site_name, table_name, limit=50, start=0, search=""):
+    """Get row data for a specific table."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    import re
+    if not re.match(r'^[a-zA-Z0-9_ \-\.]+$', table_name):
+        frappe.throw("Invalid table name")
+        
+    try:
+        limit = min(int(limit), 500)
+        start = max(int(start), 0)
+    except (ValueError, TypeError):
+        limit = 50
+        start = 0
+        
+    try:
+        conn, db_name = get_site_db_connection(bench_path, site_name)
+        with conn.cursor() as cursor:
+            where_clause = ""
+            args = []
+            if search:
+                cursor.execute("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = %s AND table_name = %s AND DATA_TYPE IN ('varchar', 'text', 'longtext', 'mediumtext', 'char')", (db_name, table_name))
+                cols = [r['COLUMN_NAME'] for r in cursor.fetchall()]
+                if cols:
+                    where_clause = "WHERE " + " OR ".join([f"`{c}` LIKE %s" for c in cols])
+                    args = [f"%{search}%"] * len(cols)
+            
+            sql = f"SELECT * FROM `{table_name}` {where_clause} LIMIT %s OFFSET %s"
+            args.extend([limit, start])
+            cursor.execute(sql, tuple(args))
+            rows = cursor.fetchall()
+            
+            count_sql = f"SELECT COUNT(*) as total FROM `{table_name}` {where_clause}"
+            cursor.execute(count_sql, tuple(args[:-2]) if args else ())
+            total = cursor.fetchone()['total']
+            
+        conn.close()
+        
+        # Serialize datetime and timedelta to string
+        import datetime
+        for row in rows:
+            for k, v in row.items():
+                if isinstance(v, (datetime.datetime, datetime.date, datetime.timedelta)):
+                    row[k] = str(v)
+                elif isinstance(v, bytes):
+                    try:
+                        row[k] = v.decode('utf-8')
+                    except:
+                        row[k] = v.hex()
+                        
+        return {"status": "success", "rows": rows, "total": total}
+    except Exception as e:
+        frappe.log_error(f"Error fetching data for {table_name}: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@frappe.whitelist()
+def execute_custom_query(bench_path, site_name, query):
+    """Execute raw SQL query."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    
+    if not query or not query.strip():
+        frappe.throw("Query cannot be empty")
+        
+    try:
+        conn, _ = get_site_db_connection(bench_path, site_name)
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            if query.strip().upper().startswith("SELECT") or query.strip().upper().startswith("SHOW") or query.strip().upper().startswith("DESCRIBE"):
+                rows = cursor.fetchall()
+            else:
+                conn.commit()
+                rows = [{"affected_rows": cursor.rowcount}]
+                
+        conn.close()
+        
+        # Serialize datetime and timedelta to string
+        import datetime
+        for row in rows:
+            for k, v in row.items():
+                if isinstance(v, (datetime.datetime, datetime.date, datetime.timedelta)):
+                    row[k] = str(v)
+                elif isinstance(v, bytes):
+                    try:
+                        row[k] = v.decode('utf-8')
+                    except:
+                        row[k] = v.hex()
+                        
+        return {"status": "success", "rows": rows}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@frappe.whitelist()
+def update_table_row(bench_path, site_name, table_name, pk_field, pk_value, updates):
+    """Update a specific row in a table."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    
+    import re
+    if not re.match(r'^[a-zA-Z0-9_ \-\.]+$', table_name):
+        frappe.throw("Invalid table name")
+        
+    import json
+    if isinstance(updates, str):
+        updates = json.loads(updates)
+        
+    if not updates:
+        return {"status": "success"}
+        
+    try:
+        conn, _ = get_site_db_connection(bench_path, site_name)
+        with conn.cursor() as cursor:
+            set_clause = ", ".join([f"`{k}` = %s" for k in updates.keys()])
+            values = list(updates.values())
+            
+            sql = f"UPDATE `{table_name}` SET {set_clause} WHERE `{pk_field}` = %s"
+            values.append(pk_value)
+            
+            cursor.execute(sql, tuple(values))
+            conn.commit()
+            
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 

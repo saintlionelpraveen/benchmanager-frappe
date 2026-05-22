@@ -36,7 +36,7 @@ for i in $(seq 1 30); do
 done
 
 # Set root password and permissions on first run
-MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-admin}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-root}"
 mariadb -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';" 2>/dev/null || true
 mariadb -u root -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH PRIVILEGES;" 2>/dev/null || true
 echo "  MariaDB is ready."
@@ -60,7 +60,11 @@ if ! grep -q "db_host" "${SITES_DIR}/common_site_config.json" 2>/dev/null; then
     su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g redis_cache redis://127.0.0.1:6379"
     su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g redis_queue redis://127.0.0.1:6379"
     su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g redis_socketio redis://127.0.0.1:6379"
+    su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g restart_supervisor_on_update 0"
+    su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g restart_systemd_on_update 0"
     su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -gp socketio_port 9000"
+    su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g root_login root"
+    su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench set-config -g root_password '${MYSQL_ROOT_PASSWORD}'"
 
     ADMIN_PASSWORD="${FRAPPE_ADMIN_PASSWORD:-admin}"
 
@@ -72,6 +76,10 @@ if ! grep -q "db_host" "${SITES_DIR}/common_site_config.json" 2>/dev/null; then
         --db-root-password='${MYSQL_ROOT_PASSWORD}' \
         --install-app bench_manager \
         --set-default"
+    
+    # Bypass the setup wizard since Bench Manager doesn't need ERPNext-like setup
+    su -s /bin/bash frappe -c "cd ${BENCH_DIR} && bench --site bench-manager.local set-config setup_complete 1"
+
     echo "  Site created successfully!"
 else
     echo "[4/5] Site already configured. Skipping."
