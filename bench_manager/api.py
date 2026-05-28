@@ -8,6 +8,8 @@ Only System Manager role can access these endpoints.
 import json
 import os
 import shutil
+import signal
+import socket
 import subprocess
 import time
 
@@ -91,24 +93,145 @@ def drop_site(site_name, db_root_password=None):
 
     return {"status": "started", "message": f"Site deletion for '{site_name}' has started."}
 
-@frappe.whitelist()
-def get_current_site():
-    """Get the currently active site (default_site in common_site_config.json)."""
-    frappe.only_for("System Manager")
+
+# ─── Site Server Management ─────────────────────────────────────────
+# Each non-bench-manager site runs on its own dev server (bench serve)
+# on a unique port. This avoids the Frappe site-pinning problem where
+# opening localhost always serves the bench_manager site regardless
+# of the Host header.
+
+_SITE_SERVERS_FILE = "site_servers.json"
+
+
+def _get_site_servers_path():
+    """Get path to the site servers tracking file."""
     bench_path = get_bench_path()
-    common_site_config_file = os.path.join(bench_path, "sites", "common_site_config.json")
-    if os.path.exists(common_site_config_file):
-        with open(common_site_config_file, "r") as f:
-            try:
-                config = json.load(f)
-                return config.get("default_site")
-            except Exception:
-                pass
-    return None
+    return os.path.join(bench_path, _SITE_SERVERS_FILE)
+
+
+def _read_site_servers():
+    """Read the site servers tracking file.
+
+    Returns:
+        dict: Mapping of site_name -> {"pid": int, "port": int}
+    """
+    path = _get_site_servers_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_site_servers(data):
+    """Write the site servers tracking file."""
+    path = _get_site_servers_path()
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _is_process_alive(pid):
+    """Check if a process with the given PID is still running and not a zombie."""
+    try:
+        os.kill(pid, 0)
+        # Also check if the process is a zombie
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("State:"):
+                        if "Z" in line:  # Zombie state
+                            return False
+                        break
+        except (FileNotFoundError, PermissionError):
+            pass
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def _find_free_port():
+    """Find an available TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def _cleanup_dead_servers():
+    """Remove entries for servers whose processes are no longer running."""
+    servers = _read_site_servers()
+    cleaned = {}
+    for site, info in servers.items():
+        if _is_process_alive(info.get("pid", 0)):
+            cleaned[site] = info
+    if len(cleaned) != len(servers):
+        _write_site_servers(cleaned)
+    return cleaned
+
+
+def _ensure_site_hostname_mapping(site_name, domains, site_map):
+    """Ensure a site has a .localhost domain mapping for multi-tenancy."""
+    if not site_name.endswith(".localhost"):
+        hostname = f"{site_name}.localhost"
+    else:
+        hostname = site_name
+    domains[hostname] = site_name
+    site_map[hostname] = site_name
+
 
 @frappe.whitelist()
-def set_current_site(site_name):
-    """Set the currently active site by writing to currentsite.txt and common_site_config.json."""
+def get_current_site():
+    """Get the currently active site.
+
+    For bench_manager, returns the bench_manager site (always active).
+    For other sites, checks if a dev server subprocess is running.
+    Returns the first running site found, or None.
+    """
+    frappe.only_for("System Manager")
+    servers = _cleanup_dead_servers()
+    # Return the first running site (there should ideally be 0 or 1)
+    for site_name in servers:
+        return site_name
+    return None
+
+
+@frappe.whitelist()
+def check_site_active(site_name):
+    """Check if a given site is currently active.
+
+    For bench_manager site: always active.
+    For other sites: checks if a dev server process is running.
+
+    Args:
+        site_name (str): Name of the site to check.
+
+    Returns:
+        dict: {"active": bool, "is_host_site": bool, "port": int|None}
+    """
+    frappe.only_for("System Manager")
+    site_name = sanitize_input(site_name, "Site Name")
+
+    # The site serving the dashboard is always active
+    is_host_site = site_name == getattr(frappe.local, "site", None)
+    if is_host_site:
+        return {"active": True, "is_host_site": True, "port": None}
+
+    # Check if a dev server is running for this site
+    servers = _cleanup_dead_servers()
+    if site_name in servers:
+        return {"active": True, "is_host_site": False, "port": servers[site_name]["port"]}
+
+    return {"active": False, "is_host_site": False, "port": None}
+
+
+@frappe.whitelist()
+def start_site_server(site_name):
+    """Start a dedicated dev server for the given site.
+
+    Spawns a `bench serve --port <port>` process with FRAPPE_SITE env set.
+    The site gets its own isolated dev server on a unique port.
+    """
     frappe.only_for("System Manager")
     site_name = sanitize_input(site_name, "Site Name")
     bench_path = get_bench_path()
@@ -117,88 +240,160 @@ def set_current_site(site_name):
     if not os.path.isdir(os.path.join(sites_path, site_name)):
         frappe.throw(f"Site '{site_name}' does not exist")
 
-    errors = []
+    # Don't allow starting bench_manager (it's always running)
+    if site_name == frappe.local.site:
+        frappe.throw("Bench Manager site is always active and cannot be started separately.")
 
-    # Write currentsite.txt
-    try:
-        with open(os.path.join(sites_path, "currentsite.txt"), "w") as f:
-            f.write(site_name)
-    except Exception as e:
-        errors.append(f"currentsite.txt: {e}")
+    # Check if already running
+    servers = _cleanup_dead_servers()
+    if site_name in servers:
+        return {
+            "status": "already_running",
+            "port": servers[site_name]["port"],
+            "message": f"Site '{site_name}' is already running on port {servers[site_name]['port']}."
+        }
 
-    # Update common_site_config.json
-    csc_path = os.path.join(sites_path, "common_site_config.json")
-    try:
-        with open(csc_path) as f:
-            config = json.load(f)
+    # Find a free port
+    port = _find_free_port()
 
-        config["default_site"] = site_name
+    # Spawn the dev server subprocess
+    env = os.environ.copy()
+    env["FRAPPE_SITE"] = site_name
+    # Remove Werkzeug reloader env vars inherited from parent server
+    # to prevent the child from reusing the parent's socket FD
+    env.pop("WERKZEUG_SERVER_FD", None)
+    env.pop("WERKZEUG_RUN_MAIN", None)
 
-        # Also update hostname→site mapping (domains/sites) so localhost serves this site
-        domains = config.get("domains", {})
-        domains["localhost"] = site_name
-        domains["127.0.0.1"] = site_name
-        config["domains"] = domains
+    log_dir = os.path.join(bench_path, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"site_server_{site_name}.log")
 
-        site_map = config.get("sites", {})
-        site_map["localhost"] = site_name
-        site_map["127.0.0.1"] = site_name
-        config["sites"] = site_map
+    with open(log_file, "w") as lf:
+        proc = subprocess.Popen(
+            ["bench", "serve", "--port", str(port)],
+            cwd=bench_path,
+            env=env,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
 
-        with open(csc_path, "w") as f:
-            json.dump(config, f, indent=1)
-    except Exception as e:
-        errors.append(f"common_site_config.json: {e}")
+    # Track the server
+    servers[site_name] = {"pid": proc.pid, "port": port}
+    _write_site_servers(servers)
 
-    # Invalidate Frappe's config cache so it picks up the change immediately
-    try:
-        frappe.cache().delete_value("app_config")
-        frappe.cache().delete_value("site_config")
-    except Exception:
-        pass
+    return {
+        "status": "started",
+        "port": port,
+        "pid": proc.pid,
+        "message": f"Site '{site_name}' started on port {port}."
+    }
 
-    if errors:
-        frappe.throw("Failed to set current site: " + "; ".join(errors))
-    return {"status": "success", "message": f"Site '{site_name}' set as current."}
+
+@frappe.whitelist()
+def stop_site_server(site_name):
+    """Stop the dedicated dev server for the given site."""
+    frappe.only_for("System Manager")
+    site_name = sanitize_input(site_name, "Site Name")
+
+    # Don't allow stopping bench_manager
+    if site_name == frappe.local.site:
+        frappe.throw("Bench Manager site cannot be stopped.")
+
+    servers = _read_site_servers()
+    if site_name not in servers:
+        return {"status": "not_running", "message": f"Site '{site_name}' is not running."}
+
+    pid = servers[site_name].get("pid")
+    if pid and _is_process_alive(pid):
+        try:
+            # Kill the process group to ensure child processes are also terminated
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+        # Give it a moment, then force kill if needed
+        time.sleep(0.5)
+        if _is_process_alive(pid):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+
+    del servers[site_name]
+    _write_site_servers(servers)
+
+    return {"status": "stopped", "message": f"Site '{site_name}' stopped."}
+
+
+@frappe.whitelist()
+def get_site_open_url(site_name):
+    """Get the correct URL to open a specific site in the browser.
+
+    For bench_manager: returns the current browser URL (same server).
+    For other sites: returns the URL of the dedicated dev server if running.
+    """
+    frappe.only_for("System Manager")
+    site_name = sanitize_input(site_name, "Site Name")
+    bench_path = get_bench_path()
+    sites_path = os.path.join(bench_path, "sites")
+
+    if not os.path.isdir(os.path.join(sites_path, site_name)):
+        frappe.throw(f"Site '{site_name}' does not exist")
+
+    # For bench_manager site, return the current server URL
+    if site_name == frappe.local.site:
+        port = 8000
+        csc_path = os.path.join(sites_path, "common_site_config.json")
+        try:
+            with open(csc_path) as f:
+                config = json.load(f)
+                port = config.get("webserver_port", 8000)
+        except Exception:
+            pass
+        return {
+            "url": None,  # Signal to JS to use current window location
+            "is_bench_manager": True,
+            "port": port,
+        }
+
+    # For other sites, check if a dev server is running
+    servers = _cleanup_dead_servers()
+    if site_name not in servers:
+        return {
+            "url": None,
+            "is_running": False,
+            "message": "Site is not running. Start the site first.",
+        }
+
+    port = servers[site_name]["port"]
+    return {
+        "url": f"http://localhost:{port}",
+        "is_running": True,
+        "port": port,
+    }
+
+
+@frappe.whitelist()
+def set_current_site(site_name):
+    """Set the currently active site by starting its dev server.
+
+    This is a convenience wrapper around start_site_server.
+    """
+    return start_site_server(site_name)
+
 
 @frappe.whitelist()
 def clear_current_site(site_name=None):
-    """Clear the currently active site."""
-    frappe.only_for("System Manager")
-    bench_path = get_bench_path()
-    common_site_config_file = os.path.join(bench_path, "sites", "common_site_config.json")
-    
-    if os.path.exists(common_site_config_file):
-        try:
-            with open(common_site_config_file, "r") as f:
-                config = json.load(f)
-            
-            if "default_site" in config:
-                if site_name and config["default_site"] != site_name:
-                    return {"status": "success", "message": "Already stopped."}
-                del config["default_site"]
+    """Stop the site's dedicated dev server."""
+    if site_name:
+        return stop_site_server(site_name)
+    # If no site specified, stop all non-bench-manager site servers
+    servers = _cleanup_dead_servers()
+    for site in list(servers.keys()):
+        stop_site_server(site)
+    return {"status": "success", "message": "All site servers stopped."}
 
-            # Also clear localhost mapping so default_site takes effect
-            for key in ("domains", "sites"):
-                mapping = config.get(key, {})
-                for hostname in list(mapping.keys()):
-                    if hostname == "localhost" or hostname == "127.0.0.1":
-                        if mapping[hostname] == site_name or site_name is None:
-                            del mapping[hostname]
-                config[key] = mapping
-
-            with open(common_site_config_file, "w") as f:
-                json.dump(config, f, indent=1)
-        except Exception:
-            pass
-    
-    try:
-        frappe.cache().delete_value("app_config")
-        frappe.cache().delete_value("site_config")
-    except Exception:
-        pass
-
-    return {"status": "success", "message": "Current site cleared (Stopped)."}
 
 
 @frappe.whitelist()
@@ -210,37 +405,25 @@ def list_sites():
     bench_path = get_bench_path()
     site_data = []
 
-    # Read current site from multiple possible config locations
-    current_site = None
-    common_site_config_file = os.path.join(bench_path, "sites", "common_site_config.json")
-    if os.path.exists(common_site_config_file):
-        try:
-            with open(common_site_config_file, "r") as f:
-                config = json.load(f)
-                current_site = config.get("default_site") or None
-                # Check domains/sites mapping for localhost (overrides default_site in Frappe)
-                for key in ("domains", "sites"):
-                    mapping = config.get(key, {})
-                    for hostname, mapped_site in mapping.items():
-                        if hostname in ("localhost", "127.0.0.1"):
-                            current_site = mapped_site
-                            break
-        except Exception:
-            pass
+    # Get running site servers to determine status
+    running_servers = _cleanup_dead_servers()
+    bench_manager_site = frappe.local.site
 
     for site in sites:
         site_config_path = os.path.join(bench_path, "sites", site, "site_config.json")
         status = "Inactive"
-        db_name = ""
+        port = None
 
         try:
             with open(site_config_path, "r") as f:
                 config = json.load(f)
-                db_name = config.get("db_name", "")
                 if config.get("maintenance_mode", 0):
                     status = "Maintenance"
-                elif site == current_site:
+                elif site == bench_manager_site:
+                    status = "Active"  # Bench manager is always active
+                elif site in running_servers:
                     status = "Active"
+                    port = running_servers[site].get("port")
         except Exception as e:
             frappe.logger("bench_manager").error(f"Error reading site config for {site}: {e}")
             status = "Unknown"
@@ -254,7 +437,9 @@ def list_sites():
         site_data.append({
             "site_name": site,
             "status": status,
-            "is_current": site == current_site,
+            "is_current": site == bench_manager_site or site in running_servers,
+            "is_bench_manager": site == bench_manager_site,
+            "port": port,
             "apps": apps,
         })
 
@@ -1844,15 +2029,25 @@ def set_default_site_on_bench(bench_path, site_name):
 
         config["default_site"] = site_name
 
-        # Update hostname mappings so localhost/127.0.0.1 always serve this site
+        # Build hostname mappings for multi-tenancy:
+        # Each site gets a {name}.localhost entry so Frappe routes by Host header.
+        # Do NOT map localhost/127.0.0.1 — that would hijack all traffic
+        # and break the bench manager site.
         domains = config.get("domains", {})
-        domains["localhost"] = site_name
-        domains["127.0.0.1"] = site_name
-        config["domains"] = domains
-
         site_map = config.get("sites", {})
-        site_map["localhost"] = site_name
-        site_map["127.0.0.1"] = site_name
+
+        # Add mapping for the target site
+        _ensure_site_hostname_mapping(site_name, domains, site_map)
+
+        # Also ensure mappings exist for ALL other sites so multi-tenancy works
+        for entry in os.listdir(sites_path):
+            entry_path = os.path.join(sites_path, entry)
+            if os.path.isdir(entry_path) and entry not in (
+                "assets", "__pycache__", ".cache"
+            ):
+                _ensure_site_hostname_mapping(entry, domains, site_map)
+
+        config["domains"] = domains
         config["sites"] = site_map
 
         with open(csc_path, "w") as f:
@@ -1862,7 +2057,23 @@ def set_default_site_on_bench(bench_path, site_name):
 
     if errors:
         return {"status": "error", "message": "Failed: " + "; ".join(errors)}
-    return {"status": "success", "message": f"'{site_name}' set as default on {bench_name}."}
+
+    # Determine the URL for opening the site
+    port = 8000
+    try:
+        with open(csc_path) as f:
+            cfg = json.load(f)
+            port = cfg.get("webserver_port", 8000)
+    except Exception:
+        pass
+
+    hostname = f"{site_name}.localhost" if not site_name.endswith(".localhost") else site_name
+
+    return {
+        "status": "success",
+        "message": f"'{site_name}' set as default on {bench_name}.",
+        "open_url": f"http://{hostname}:{port}",
+    }
 
 
 @frappe.whitelist()

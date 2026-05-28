@@ -67,6 +67,33 @@ class BenchDashboard {
 		}
 	}
 
+	/**
+	 * Convert a Frappe site name to a browser-resolvable hostname.
+	 * 
+	 * Frappe sites may be named like "idlibook", "test", "bench_manager.local", etc.
+	 * Browsers can only resolve:
+	 *   - *.localhost (Chrome/Edge auto-resolve to 127.0.0.1)
+	 *   - Hostnames with explicit DNS/hosts entries
+	 * 
+	 * This method appends ".localhost" to site names that don't already contain it,
+	 * ensuring the URL resolves correctly for multi-tenancy routing.
+	 * 
+	 * Examples:
+	 *   "idlibook"              → "idlibook.localhost"
+	 *   "test"                  → "test.localhost"
+	 *   "bench_manager.local"   → "bench_manager.local.localhost"
+	 *   "mysite.localhost"      → "mysite.localhost" (already valid)
+	 */
+	_get_site_hostname(siteName) {
+		if (!siteName) return 'localhost';
+		// If the site name already ends with .localhost, use as-is
+		if (siteName.endsWith('.localhost')) {
+			return siteName;
+		}
+		// Append .localhost for proper DNS resolution
+		return `${siteName}.localhost`;
+	}
+
 	init() {
 		try {
 			this.page.main.html(frappe.render_template('bench_dashboard'));
@@ -981,7 +1008,7 @@ class BenchDashboard {
 									fieldtype: 'HTML', fieldname: 'site_url_preview',
 									options: `<div style="padding:10px 14px; background:var(--bg-light-gray); border-radius:10px; margin-top:6px;">
 										<div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); font-weight:700; margin-bottom:4px;">URL Preview</div>
-										<div style="font-size:14px; font-weight:600; color:var(--primary);">http://localhost:${port}</div>
+										<div style="font-size:14px; font-weight:600; color:var(--primary);">http://${frappe.utils.escape_html(self._get_site_hostname(sites[0]))}:${port}</div>
 										<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Site: ${frappe.utils.escape_html(sites[0])}</div>
 									</div>`
 								},
@@ -995,8 +1022,10 @@ class BenchDashboard {
 									args: { bench_path: benchPath, site_name: values.site_name },
 									callback: (r) => {
 										frappe.show_alert({ message: r.message.message, indicator: 'green' });
-										const url = `http://localhost:${port}`;
-										window.open(url, '_blank');
+										// Use the open_url returned by the API
+										if (r.message.open_url) {
+											setTimeout(() => window.open(r.message.open_url, '_blank'), 500);
+										}
 									},
 									error: () => {
 										frappe.show_alert({ message: 'Failed to set default site', indicator: 'red' });
@@ -1010,7 +1039,7 @@ class BenchDashboard {
 							d.fields_dict.site_url_preview.$wrapper.html(
 								`<div style="padding:10px 14px; background:var(--bg-light-gray); border-radius:10px; margin-top:6px;">
 									<div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); font-weight:700; margin-bottom:4px;">URL Preview</div>
-									<div style="font-size:14px; font-weight:600; color:var(--primary);">http://localhost:${port}</div>
+									<div style="font-size:14px; font-weight:600; color:var(--primary);">http://${frappe.utils.escape_html(self._get_site_hostname(site))}:${port}</div>
 									<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Site: ${frappe.utils.escape_html(site)}</div>
 								</div>`
 							);
@@ -1130,9 +1159,13 @@ class BenchDashboard {
 
 		sites.forEach((site) => {
 			const badgeClass = `badge-${(site.status || 'unknown').toLowerCase()}`;
+			// The bench_manager site runs permanently — don't show Start/Stop for it
+			const isBenchManagerSite = site.site_name === (frappe.boot.sitename || '') || site.site_name === 'bench_manager.local';
+			const isActive = site.status === 'Active' || isBenchManagerSite;
+			const isInactive = site.status === 'Inactive';
 			html += `<tr data-site="${frappe.utils.escape_html(site.site_name)}">
-				<td><strong>${frappe.utils.escape_html(site.site_name)}</strong></td>
-				<td><span class="badge-status ${badgeClass}">${frappe.utils.escape_html(site.status)}</span></td>
+				<td><strong>${frappe.utils.escape_html(site.site_name)}</strong>${isBenchManagerSite ? ' <span style="font-size:10px;font-weight:600;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:6px;margin-left:4px;">ALWAYS ON</span>' : ''}</td>
+				<td><span class="badge-status ${isBenchManagerSite ? 'badge-active' : badgeClass}">${isBenchManagerSite ? 'Active' : frappe.utils.escape_html(site.status)}</span></td>
 				<td>
 					<button class="btn btn-xs btn-default show-apps-btn" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; border: 1px solid #d0d5dd; color: #344054; background: #fff; cursor: pointer; transition: all 0.2s ease;">
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: -2px;"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -1145,16 +1178,16 @@ class BenchDashboard {
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
 						</a>
 						<ul class="dropdown-menu dropdown-menu-right" style="min-width: 180px; padding: 6px 0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-							<li><a class="dropdown-item site-start" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">▶ Start</a></li>
-							<li><a class="dropdown-item site-stop" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">■ Stop</a></li>
-							<li><a class="dropdown-item site-open ${site.status !== 'Active' ? 'text-muted' : ''}" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" data-status="${site.status}" style="padding: 8px 16px; display: block; ${site.status !== 'Active' ? 'opacity: 0.6; cursor: not-allowed;' : ''}">↗ Open Site</a></li>
+							${!isBenchManagerSite && isInactive ? `<li><a class="dropdown-item site-start" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">▶ Start</a></li>` : ''}
+							${!isBenchManagerSite && isActive ? `<li><a class="dropdown-item site-stop" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">■ Stop</a></li>` : ''}
+							${isActive ? `<li><a class="dropdown-item site-open" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" data-status="${site.status}" style="padding: 8px 16px; display: block;">↗ Open Site</a></li>` : ''}
 							<li><a class="dropdown-item site-live-activity" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">⚡ Live Activity</a></li>
 							<li class="divider" style="margin: 4px 0;"></li>
 							<li><a class="dropdown-item site-migrate" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">Migrate</a></li>
 							<li><a class="dropdown-item site-backup" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">Backup</a></li>
 							<li><a class="dropdown-item site-maintenance" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" data-mode="${site.status === 'Maintenance' ? '0' : '1'}" style="padding: 8px 16px; display: block;">${site.status === 'Maintenance' ? 'Disable Maint.' : 'Maintenance'}</a></li>
-							<li class="divider" style="margin: 4px 0;"></li>
-							<li><a class="dropdown-item site-drop text-danger" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; color: #dc3545; display: block;">✕ Drop Site</a></li>
+							${!isBenchManagerSite ? `<li class="divider" style="margin: 4px 0;"></li>
+							<li><a class="dropdown-item site-drop text-danger" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; color: #dc3545; display: block;">✕ Drop Site</a></li>` : ''}
 						</ul>
 					</div>
 				</td>
@@ -1225,25 +1258,24 @@ class BenchDashboard {
 		this.$container.find('.site-start').on('click', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
+			self.append_console(`Starting dev server for ${site}...`, 'command');
+			frappe.show_alert({ message: `Starting ${site}...`, indicator: 'blue' });
+
 			frappe.call({
-				method: 'bench_manager.api.get_current_site',
+				method: 'bench_manager.api.start_site_server',
+				args: { site_name: site },
 				callback: (r) => {
-					const cs = r.message;
-					if (cs && cs !== site) {
-						frappe.msgprint(`Site <strong>${cs}</strong> is currently active. Stop it first before starting <strong>${site}</strong>.`);
-					} else if (cs === site) {
-						frappe.show_alert({ message: `${site} is already active.`, indicator: 'blue' });
+					const result = r.message;
+					if (result.status === 'already_running') {
+						frappe.show_alert({ message: `${site} is already running on port ${result.port}.`, indicator: 'blue' });
 					} else {
-						self.append_console(`Setting ${site} as current site...`, 'command');
-						frappe.call({
-							method: 'bench_manager.api.set_current_site',
-							args: { site_name: site },
-							callback: () => {
-								self.append_console(`${site} is now the active site.`, 'success');
-								setTimeout(() => self.load_sites(), 1500);
-							}
-						});
+						self.append_console(`${site} started on port ${result.port}.`, 'success');
+						frappe.show_alert({ message: `${site} started on port ${result.port}`, indicator: 'green' });
 					}
+					setTimeout(() => self.load_sites(), 1500);
+				},
+				error: () => {
+					frappe.show_alert({ message: `Failed to start ${site}`, indicator: 'red' });
 				}
 			});
 		});
@@ -1251,22 +1283,24 @@ class BenchDashboard {
 		this.$container.find('.site-stop').on('click', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
+			self.append_console(`Stopping site server for ${site}...`, 'command');
+			frappe.show_alert({ message: `Stopping ${site}...`, indicator: 'orange' });
+
 			frappe.call({
-				method: 'bench_manager.api.get_current_site',
+				method: 'bench_manager.api.stop_site_server',
+				args: { site_name: site },
 				callback: (r) => {
-					if (r.message !== site) {
-						frappe.show_alert({ message: `${site} is not currently active.`, indicator: 'orange' });
+					const result = r.message;
+					if (result.status === 'not_running') {
+						frappe.show_alert({ message: `${site} is not currently running.`, indicator: 'orange' });
 					} else {
-						self.append_console(`Stopping site ${site}...`, 'command');
-						frappe.call({
-							method: 'bench_manager.api.clear_current_site',
-							args: { site_name: site },
-							callback: () => {
-								self.append_console(`${site} stopped. No active site now.`, 'success');
-								setTimeout(() => self.load_sites(), 1000);
-							}
-						});
+						self.append_console(`${site} stopped.`, 'success');
+						frappe.show_alert({ message: `${site} stopped`, indicator: 'green' });
 					}
+					setTimeout(() => self.load_sites(), 1000);
+				},
+				error: () => {
+					frappe.show_alert({ message: `Failed to stop ${site}`, indicator: 'red' });
 				}
 			});
 		});
@@ -1276,25 +1310,41 @@ class BenchDashboard {
 			const site = $(this).data('site');
 			const status = $(this).data('status');
 
-			if (status !== 'Active') {
-				frappe.msgprint('Only the active site can be opened. Please start this site first.');
+			if (status === 'Maintenance') {
+				frappe.msgprint('This site is in maintenance mode. Disable maintenance mode first.');
 				return;
 			}
 
-			frappe.show_alert({ message: `Setting ${site} as default and opening...`, indicator: 'blue' });
-			// Set as default site then open via localhost (uses current window's port = host bench)
+			frappe.show_alert({ message: `Opening ${site}...`, indicator: 'blue' });
+
 			frappe.call({
-				method: 'bench_manager.api.set_current_site',
+				method: 'bench_manager.api.get_site_open_url',
 				args: { site_name: site },
-				callback: () => {
-					// Small delay so Frappe picks up config change
-					setTimeout(() => {
-						const port = window.location.port ? `:${window.location.port}` : '';
-						window.open(`${window.location.protocol}//localhost${port}`, '_blank');
-					}, 300);
+				callback: (r) => {
+					const result = r.message;
+
+					if (result.is_bench_manager) {
+						// Bench manager - just reload current page in new tab
+						window.open(window.location.origin, '_blank');
+						return;
+					}
+
+					if (result.url) {
+						frappe.show_alert({ message: `Opening ${site} on port ${result.port}...`, indicator: 'green' });
+						// Small delay to let the server finish starting if just started
+						setTimeout(() => window.open(result.url, '_blank'), 500);
+					} else {
+						// Site is not running - prompt user to start it first
+						frappe.msgprint({
+							title: 'Site Not Running',
+							message: `<strong>${site}</strong> is not running. Please start the site first using the <b>▶ Start</b> action, then try opening it again.`,
+							indicator: 'orange'
+						});
+					}
+					setTimeout(() => self.load_sites(), 1000);
 				},
 				error: () => {
-					frappe.show_alert({ message: 'Failed to set site as default', indicator: 'red' });
+					frappe.show_alert({ message: `Failed to get URL for ${site}`, indicator: 'red' });
 				}
 			});
 		});
