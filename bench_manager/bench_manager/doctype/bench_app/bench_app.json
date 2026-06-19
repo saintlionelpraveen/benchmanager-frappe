@@ -7,6 +7,8 @@
  "field_order": [
   "app_name",
   "app_title",
+  "description",
+  "image",
   "column_break_1",
   "git_url",
   "branch",
@@ -29,8 +31,18 @@
    "label": "App Title"
   },
   {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
    "fieldname": "column_break_1",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "image",
+   "fieldtype": "Attach Image",
+   "label": "App Image"
   },
   {
    "fieldname": "git_url",

@@ -1624,7 +1624,7 @@ class BenchDashboard {
 			args: args,
 			callback: (r) => {
 				if (r.message && r.message.length) {
-					this.render_apps_table(r.message);
+					this.render_app_cards(r.message);
 				} else {
 					$wrapper.html(`
 						<div class="empty-state">
@@ -1637,10 +1637,31 @@ class BenchDashboard {
 		});
 	}
 
-	render_apps_table(apps) {
+	get_frappe_official_apps() {
+		return [
+			{ id: 'erpnext', name: 'ERPNext', desc: 'Full-featured open-source ERP for accounting, inventory, manufacturing, HR, and CRM.', repo: 'https://github.com/frappe/erpnext.git', iconUrl: 'https://raw.githubusercontent.com/frappe/erpnext/develop/erpnext/public/images/erpnext-logo.svg' },
+			{ id: 'builder', name: 'Frappe Builder', desc: 'Visual no-code website builder with drag-and-drop blocks and dynamic data binding.', repo: 'https://github.com/frappe/builder.git', iconUrl: 'https://raw.githubusercontent.com/frappe/builder/develop/frontend/public/builder_logo.png' },
+			{ id: 'crm', name: 'Frappe CRM', desc: 'Modern, open-source CRM with deal pipeline, email, calls, notes, and AI integration.', repo: 'https://github.com/frappe/crm.git', iconUrl: 'https://raw.githubusercontent.com/frappe/crm/develop/crm/public/images/logo.svg' },
+			{ id: 'drive', name: 'Frappe Drive', desc: 'File storage and document management with sharing, permissions, and collaborative editing.', repo: 'https://github.com/frappe/drive.git', iconUrl: 'https://raw.githubusercontent.com/frappe/drive/develop/drive/public/images/icons/logo.svg' },
+			{ id: 'ecommerce_integrations', name: 'eCommerce Integrations', desc: 'Connectors for Shopify, WooCommerce, and other eCommerce platforms with ERPNext.', repo: 'https://github.com/frappe/ecommerce_integrations.git', iconUrl: 'https://raw.githubusercontent.com/frappe/ecommerce_integrations/main/ecommerce_integrations/public/images/ecommerce-integrations-logo.svg' },
+			{ id: 'hrms', name: 'Frappe HR', desc: 'Modern HR and Payroll management software.', repo: 'https://github.com/frappe/hrms.git', iconUrl: 'https://raw.githubusercontent.com/frappe/hrms/develop/hrms/public/images/frappe-hr-logo.svg' },
+			{ id: 'lms', name: 'Frappe LMS', desc: 'Easy-to-use Learning Management System.', repo: 'https://github.com/frappe/lms.git', iconUrl: 'https://raw.githubusercontent.com/frappe/lms/develop/lms/public/images/lms-logo.png' },
+			{ id: 'helpdesk', name: 'Frappe Helpdesk', desc: 'Modern, streamlined customer support and issue tracking tool.', repo: 'https://github.com/frappe/helpdesk.git', iconUrl: 'https://raw.githubusercontent.com/frappe/helpdesk/develop/.github/hd-logo.svg' },
+			{ id: 'insights', name: 'Frappe Insights', desc: 'Open-source BI tool for data exploration, dashboards, and SQL queries.', repo: 'https://github.com/frappe/insights.git', iconUrl: 'https://raw.githubusercontent.com/frappe/insights/develop/frontend/src/assets/insights-logo.svg' },
+			{ id: 'wiki', name: 'Frappe Wiki', desc: 'Simple wiki for knowledge-base management.', repo: 'https://github.com/frappe/wiki.git', iconUrl: 'https://raw.githubusercontent.com/frappe/wiki/develop/wiki/public/images/wiki-logo.png' },
+			{ id: 'print_designer', name: 'Print Designer', desc: 'Drag-and-drop visual print format designer for Frappe.', repo: 'https://github.com/frappe/print_designer.git', iconUrl: 'https://raw.githubusercontent.com/frappe/print_designer/develop/print_designer/public/images/print-designer-logo.svg' },
+			{ id: 'lending', name: 'Lending', desc: 'Loan management application built on top of ERPNext.', repo: 'https://github.com/frappe/lending.git', iconUrl: 'https://raw.githubusercontent.com/frappe/lending/develop/lending/public/images/frappe-lending-logo.svg' },
+			{ id: 'gameplan', name: 'Gameplan', desc: 'Team communication and discussion tool.', repo: 'https://github.com/frappe/gameplan.git', iconUrl: 'https://raw.githubusercontent.com/frappe/gameplan/main/gameplan/public/gameplan-logo.svg' },
+			{ id: 'payments', name: 'Payments', desc: 'Payments processing app.', repo: 'https://github.com/frappe/payments.git', iconUrl: 'https://raw.githubusercontent.com/frappe/payments/develop/payments/public/images/payments-logo.svg' },
+			{ id: 'webshop', name: 'Webshop', desc: 'Open Source E-Commerce.', repo: 'https://github.com/frappe/webshop.git', iconUrl: 'https://raw.githubusercontent.com/frappe/webshop/develop/webshop/public/images/webshop-logo.svg' },
+			{ id: 'healthcare', name: 'Healthcare', desc: 'Healthcare domain for ERPNext.', repo: 'https://github.com/frappe/healthcare.git', iconUrl: 'https://raw.githubusercontent.com/frappe/healthcare/develop/healthcare/public/images/healthcare-logo.svg' },
+			{ id: 'education', name: 'Education', desc: 'Education domain for ERPNext.', repo: 'https://github.com/frappe/education.git', iconUrl: 'https://raw.githubusercontent.com/frappe/education/develop/education/public/images/education-logo.svg' }
+		];
+	}
+
+	render_app_cards(apps) {
 		const $wrapper = this.$container.find('#apps-table-wrapper');
 
-		// Also load sites for the install dropdown
 		const site_method = this.is_host_bench ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
 		const site_args = this.is_host_bench ? {} : { bench_path: this.current_bench_path };
 
@@ -1649,234 +1670,319 @@ class BenchDashboard {
 			args: site_args,
 			callback: (r) => {
 				const sites = (r.message || []).map((s) => s.site_name);
-				let html = `<table class="bench-table">
-					<thead><tr>
-						<th>App Name</th><th>Git URL</th><th>Branch</th><th>Actions</th>
-					</tr></thead><tbody>`;
+				let html = `<div class="app-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">`;
 
 				apps.forEach((app) => {
-					// Determine source category
 					let source = 'custom';
-					let badgeHtml = '<span class="badge-source badge-source-custom">Custom</span>';
+					let badgeHtml = '<span class="app-card-source-badge badge-custom">Custom</span>';
 
 					const official_apps = ['frappe', 'erpnext', 'hrms', 'lms', 'builder', 'helpdesk', 'gamecenter', 'wiki', 'insights', 'crm', 'print_designer', 'desk', 'payments', 'ecommerce_integrations'];
 
 					if (official_apps.includes(app.app_name) || (app.git_url && app.git_url.includes('github.com/frappe/'))) {
 						source = 'frappe_store';
+						badgeHtml = '<span class="app-card-source-badge badge-frappe">Frappe Store</span>';
 					} else if (app.git_url) {
 						source = 'git';
+						badgeHtml = '<span class="app-card-source-badge badge-git">Git</span>';
 					}
 
-					const gitUrl = app.git_url ? `<a href="${frappe.utils.escape_html(app.git_url)}" target="_blank">${frappe.utils.escape_html(app.git_url)}</a>` : '—';
-					html += `<tr data-source="${source}">
-						<td>
-							<strong>${frappe.utils.escape_html(app.app_name)}</strong>
-						</td>
-						<td><small>${gitUrl}</small></td>
-						<td>${frappe.utils.escape_html(app.branch || '—')}</td>
-						<td>
-							<div class="dropdown">
-								<a href="#" data-toggle="dropdown" class="text-muted" style="padding: 4px; display: inline-block; box-shadow: none;">
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-								</a>
-								<ul class="dropdown-menu dropdown-menu-right" style="min-width: 160px; padding: 4px 0; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-									<li><a href="#" class="app-install" data-app="${frappe.utils.escape_html(app.app_name)}" style="padding: 6px 12px; display: block; color: var(--text-color);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: -2px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Install</a></li>
-									<li><a href="#" class="app-uninstall" data-app="${frappe.utils.escape_html(app.app_name)}" style="padding: 6px 12px; display: block; color: var(--text-color);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: -2px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Uninstall</a></li>
-									<li role="separator" class="divider" style="margin: 4px 0;"></li>
-									<li><a href="#" class="app-sites" data-app="${frappe.utils.escape_html(app.app_name)}" style="padding: 6px 12px; display: block; color: var(--text-color);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: -2px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Sites</a></li>
-									<li><a href="#" class="app-live-activity" data-app="${frappe.utils.escape_html(app.app_name)}" style="padding: 6px 12px; display: block; color: var(--text-color);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: -2px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Live Activity</a></li>
-								</ul>
+					let imgUrl = '/assets/frappe/images/frappe-framework-logo.svg';
+					if (app.image) {
+						imgUrl = frappe.utils.escape_html(app.image);
+					} else if (source === 'frappe_store') {
+						const officialApp = this.get_frappe_official_apps().find(o => o.id === app.app_name);
+						if (officialApp && officialApp.iconUrl) {
+							imgUrl = officialApp.iconUrl;
+						} else {
+							imgUrl = `https://raw.githubusercontent.com/frappe/${app.app_name}/develop/${app.app_name}/public/logo.png`;
+						}
+					}
+
+					const imageHtml = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; color: #475569;"><img src="${imgUrl}" class="app-card-icon-img" alt="App Image" style="width:100%; height:100%; object-fit:contain;" onerror="this.replaceWith(document.createTextNode('${frappe.utils.escape_html(app.app_name).charAt(0).toUpperCase()}'));"></div>`;
+
+					html += `
+					<div class="app-card" data-app="${frappe.utils.escape_html(app.app_name)}" data-source="${source}">
+						<div class="app-card-top">
+							<div class="app-card-icon-wrapper" style="overflow: hidden;">
+								${imageHtml}
 							</div>
-						</td>
-					</tr>`;
+							<div class="app-card-top-right">
+								${source === 'frappe_store' ? '<span class="app-card-verified-badge" title="Official Frappe App"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2490ef" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>' : ''}
+							</div>
+						</div>
+						<div class="app-card-body">
+							<h3 class="app-card-title">${frappe.utils.escape_html(app.app_title || app.app_name)}</h3>
+							<p class="app-card-description" title="${frappe.utils.escape_html(app.description || '')}">${frappe.utils.escape_html(app.description || 'No description provided for this app.')}</p>
+						</div>
+						<div class="app-card-footer">
+							<div class="app-card-tags">
+								<span class="app-card-tag">${frappe.utils.escape_html(app.branch || 'master')}</span>
+							</div>
+							${badgeHtml}
+						</div>
+					</div>`;
 				});
 
-				html += '</tbody></table>';
+				html += '</div>';
 				$wrapper.html(html);
-				this.bind_app_row_actions(sites);
 
-				// Re-apply active filter
+				const self = this;
+				const bench_options = self.benches ? self.benches.map(b => ({ label: b.is_host ? `${b.name} (host)` : b.name, value: b.path })) : [];
+
+				$wrapper.find('.app-card').on('click', function(e) {
+					if ($(e.target).closest('button').length) return;
+					
+					const app_name = $(this).data('app');
+					const source = $(this).data('source');
+					const app_info = apps.find(a => a.app_name === app_name) || {app_name: app_name, app_title: app_name, description: '', image: ''};
+					
+					let dialog_fields = [
+						{
+							fieldname: 'app_name',
+							fieldtype: 'Data',
+							label: 'App Name (Folder)',
+							default: app_info.app_name,
+							read_only: 1
+						},
+						{
+							fieldname: 'app_title',
+							fieldtype: 'Data',
+							label: 'App Title',
+							default: app_info.app_title || app_info.app_name
+						},
+						{
+							fieldname: 'description',
+							fieldtype: 'Small Text',
+							label: 'Description',
+							default: app_info.description || ''
+						}
+					];
+
+					if (source !== 'frappe_store') {
+						dialog_fields.push({
+							fieldname: 'image',
+							fieldtype: 'Attach Image',
+							label: 'App Icon',
+							default: app_info.image || ''
+						});
+					}
+
+					dialog_fields.push(
+						{ fieldtype: 'Section Break' },
+						{
+							fieldtype: 'HTML',
+							fieldname: 'actions',
+							options: `
+								<div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
+									<button type="button" class="btn btn-default btn-sm app-action-install" style="background: var(--btn-default-bg);">Install App</button>
+									<button type="button" class="btn btn-default btn-sm app-action-uninstall" style="background: var(--btn-default-bg);">Uninstall / Remove</button>
+									<button type="button" class="btn btn-default btn-sm app-action-sites" style="background: var(--btn-default-bg);">View Installed Sites</button>
+									<button type="button" class="btn btn-default btn-sm app-action-live" style="background: var(--btn-default-bg);">Live Terminal</button>
+								</div>
+							`
+						}
+					);
+
+					const d = new frappe.ui.Dialog({
+						title: `App Details`,
+						fields: dialog_fields,
+						primary_action_label: 'Save Changes',
+						primary_action(values) {
+							frappe.call({
+								method: 'bench_manager.api.update_bench_app_details',
+								args: {
+									app_name: app_info.app_name,
+									title: values.app_title,
+									description: values.description,
+									image: values.image || ''
+								},
+								callback: function(r) {
+									if (!r.exc) {
+										frappe.show_alert({message: 'App details saved', indicator: 'green'});
+										d.hide();
+										setTimeout(() => self.load_apps(), 500);
+									}
+								}
+							});
+						}
+					});
+
+					d.$wrapper.find('.app-action-install').on('click', () => { d.hide(); self.show_install_dialog(app_info.app_name, bench_options); });
+					d.$wrapper.find('.app-action-uninstall').on('click', () => { d.hide(); self.show_uninstall_dialog(app_info.app_name, bench_options); });
+					d.$wrapper.find('.app-action-sites').on('click', () => { d.hide(); self.show_app_sites_modal(app_info.app_name); });
+					d.$wrapper.find('.app-action-live').on('click', () => { d.hide(); self.show_live_activity(app_info.app_name); });
+
+					d.show();
+				});
+
 				const activeFilter = this.$container.find('.app-filter-chip.active').data('filter') || 'all';
 				if (activeFilter !== 'all') this.apply_app_filter(activeFilter);
 			},
 		});
 	}
 
-	bind_app_row_actions(sites) {
+	show_install_dialog(app, bench_options) {
 		const self = this;
-
-		const bench_options = self.benches ? self.benches.map(b => ({ label: b.is_host ? `${b.name} (host)` : b.name, value: b.path })) : [];
-
-		this.$container.find('.app-install').on('click', function (e) {
-			e.preventDefault();
-			const app = $(this).data('app');
-			const $row = $(this).closest('tr');
-			const d = new frappe.ui.Dialog({
-				title: `Install ${app}`,
-				fields: [
-					{
-						label: 'Target Bench',
-						fieldname: 'bench_path',
-						fieldtype: 'Select',
-						options: bench_options,
-						default: self.current_bench_path,
-						reqd: 1,
-						onchange: function () {
-							const bench_path = this.get_value();
-							const is_host = bench_path === (self.benches.find(b => b.is_host) || {}).path;
-							const site_method = is_host ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
-							const site_args = is_host ? {} : { bench_path: bench_path };
-							frappe.call({
-								method: site_method,
-								args: site_args,
-								callback: (r) => {
-									const new_sites = (r.message || []).map((s) => s.site_name || s);
-									d.set_df_property('site_name', 'options', new_sites);
-									if (new_sites.length > 0) d.set_value('site_name', new_sites[0]);
-								}
-							});
-						}
-					},
-					{ label: 'Select Site', fieldname: 'site_name', fieldtype: 'Select', options: sites, reqd: 1 }
-				],
-				primary_action_label: 'Install',
-				primary_action(values) {
-					d.hide();
-					const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
-					const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
-
-					self.append_console(`$ bench --site ${values.site_name} install-app ${app}`, 'command');
-					self.append_console(`Installing ${app} on ${values.site_name} (${bench_name}). This may take a moment...`, 'stdout');
-					self.append_console(`The app will be installed in the background. Watch the live activity for progress.`, 'info');
-					self.show_live_activity(app);
-
-					const install_method = is_host ? 'bench_manager.api.install_app' : 'bench_manager.api.install_app_on_site_remote';
-					const install_args = { site_name: values.site_name, app_name: app };
-					if (!is_host) install_args.bench_path = values.bench_path;
-
-					frappe.call({
-						method: install_method,
-						args: install_args,
-						callback: (r) => {
-							if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' });
+		frappe.call({
+			method: self.is_host_bench ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites',
+			args: self.is_host_bench ? {} : { bench_path: self.current_bench_path },
+			callback: (r) => {
+				const sites = (r.message || []).map((s) => s.site_name || s);
+				
+				const d = new frappe.ui.Dialog({
+					title: `Install ${app}`,
+					fields: [
+						{
+							label: 'Target Bench', fieldname: 'bench_path', fieldtype: 'Select', options: bench_options, default: self.current_bench_path, reqd: 1,
+							onchange: function () {
+								const bench_path = this.get_value();
+								const is_host = bench_path === (self.benches.find(b => b.is_host) || {}).path;
+								const site_method = is_host ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
+								const site_args = is_host ? {} : { bench_path: bench_path };
+								frappe.call({
+									method: site_method, args: site_args, callback: (r) => {
+										const new_sites = (r.message || []).map((s) => ({label: s.site_name || s, value: s.site_name || s}));
+										d.set_df_property('site_names', 'options', new_sites);
+									}
+								});
+							}
 						},
-					});
-				},
-			});
-			d.show();
-		});
+						{ label: 'Select Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: sites.map(s => ({label: s, value: s})), reqd: 1 }
+					],
+					primary_action_label: 'Install',
+					primary_action(values) {
+						d.hide();
+						const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
+						const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
+						const selected_sites = values.site_names;
 
-		this.$container.find('.app-uninstall').on('click', function (e) {
-			e.preventDefault();
-			const app = $(this).data('app');
-
-			const d = new frappe.ui.Dialog({
-				title: `Uninstall ${app}`,
-				fields: [
-					{
-						label: 'Target Bench',
-						fieldname: 'bench_path',
-						fieldtype: 'Select',
-						options: bench_options,
-						default: self.current_bench_path,
-						reqd: 1,
-						onchange: function () {
-							const bench_path = this.get_value();
-							frappe.call({
-								method: 'bench_manager.api.get_app_sites',
-								args: { app_name: app, bench_path: bench_path },
-								callback: (r) => {
-									const installed_sites = r.message || [];
-									d.set_df_property('site_name', 'options', installed_sites);
-									if (installed_sites.length > 0) d.set_value('site_name', installed_sites[0]);
-								}
-							});
+						if (!selected_sites || selected_sites.length === 0) {
+							frappe.msgprint('Please select at least one site.');
+							return;
 						}
-					},
-					{
-						label: 'Select Site',
-						fieldname: 'site_name',
-						fieldtype: 'Select',
-						options: [],
-						reqd: 1,
-						description: 'Only sites where this app is installed are listed.'
-					}
-				],
-				primary_action_label: 'Uninstall from Site',
-				primary_action(values) {
-					d.hide();
-					const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
-					const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
 
-					frappe.confirm(`Uninstall <strong>${app}</strong> from <strong>${values.site_name}</strong>?`, () => {
-						self.append_console(`$ bench --site ${values.site_name} uninstall-app ${app} --yes`, 'command');
-						self.append_console(`Uninstalling ${app} from ${values.site_name} (${bench_name})...`, 'stdout');
-						self.append_console(`The app will be removed in the background. Watch the live activity for progress.`, 'info');
+						self.append_console(`Installing ${app} on ${selected_sites.join(', ')} (${bench_name}). This may take a moment...`, 'stdout');
+						self.append_console(`The app will be installed in the background. Watch the live activity for progress.`, 'info');
 						self.show_live_activity(app);
 
-						const uninstall_method = is_host ? 'bench_manager.api.uninstall_app' : 'bench_manager.api.uninstall_app_from_site_remote';
-						const uninstall_args = { site_name: values.site_name, app_name: app };
-						if (!is_host) uninstall_args.bench_path = values.bench_path;
+						let idx = 0;
+						const next = () => {
+							if (idx >= selected_sites.length) {
+								frappe.show_alert({ message: 'Installation queued for all selected sites.', indicator: 'green' });
+								return;
+							}
+							const site = selected_sites[idx];
+							self.append_console(`$ bench --site ${site} install-app ${app}`, 'command');
 
-						frappe.call({
-							method: uninstall_method,
-							args: uninstall_args,
-							callback: (r) => {
-								if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'orange' });
-							},
-						});
-					});
-				},
-			});
+							const install_method = is_host ? 'bench_manager.api.install_app' : 'bench_manager.api.install_app_on_site_remote';
+							const install_args = { site_name: site, app_name: app };
+							if (!is_host) install_args.bench_path = values.bench_path;
 
-			// Load initial sites for current bench
-			frappe.call({
-				method: 'bench_manager.api.get_app_sites',
-				args: { app_name: app, bench_path: self.current_bench_path },
-				callback: (r) => {
-					const installed_sites = r.message || [];
-					if (installed_sites.length > 0) {
-						d.set_df_property('site_name', 'options', installed_sites);
-						d.set_value('site_name', installed_sites[0]);
-						d.show();
-					} else {
-						// App is not installed on any sites - show remove app from bench dialog
-						frappe.confirm(`App <strong>${app}</strong> is not installed on any sites. Do you want to <strong>remove it from the bench entirely</strong>?`, () => {
-							const is_host = self.current_bench_path === (self.benches.find(b => b.is_host) || {}).path;
-							self.append_console(`$ bench remove-app ${app} --force`, 'command');
-							self.append_console(`Removing app ${app} from bench...`, 'stdout');
-							self.show_live_activity(app);
-
-							const remove_method = is_host ? 'bench_manager.api.remove_app' : 'bench_manager.api.remove_app_remote';
-							const remove_args = { app_name: app };
-							if (!is_host) remove_args.bench_path = self.current_bench_path;
-
-							frappe.call({
-								method: remove_method,
-								args: remove_args,
-								callback: (r) => {
-									if (r.message) {
-										frappe.show_alert({ message: r.message.message, indicator: 'red' });
-										setTimeout(() => self.load_apps(), 2000);
-									}
-								},
+							frappe.call({ 
+								method: install_method, 
+								args: install_args, 
+								callback: (r) => { 
+									if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' }); 
+									idx++;
+									setTimeout(next, 500);
+								} 
 							});
+						};
+						next();
+					},
+				});
+				d.show();
+			}
+		});
+	}
+
+	show_uninstall_dialog(app, bench_options) {
+		const self = this;
+		const d = new frappe.ui.Dialog({
+			title: `Uninstall ${app}`,
+			fields: [
+				{
+					label: 'Target Bench', fieldname: 'bench_path', fieldtype: 'Select', options: bench_options, default: self.current_bench_path, reqd: 1,
+					onchange: function () {
+						const bench_path = this.get_value();
+						frappe.call({
+							method: 'bench_manager.api.get_app_sites', args: { app_name: app, bench_path: bench_path },
+							callback: (r) => {
+								const installed_sites = (r.message || []).map(s => ({label: s, value: s}));
+								d.set_df_property('site_names', 'options', installed_sites);
+							}
 						});
 					}
+				},
+				{ label: 'Select Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: [], reqd: 1, description: 'Only sites where this app is installed are listed.' }
+			],
+			primary_action_label: 'Uninstall from Site(s)',
+			primary_action(values) {
+				d.hide();
+				const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
+				const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
+				const selected_sites = values.site_names;
+
+				if (!selected_sites || selected_sites.length === 0) {
+					frappe.msgprint('Please select at least one site.');
+					return;
 				}
-			});
+
+				frappe.confirm(`Uninstall <strong>${app}</strong> from <strong>${selected_sites.join(', ')}</strong>?`, () => {
+					self.append_console(`Uninstalling ${app} from ${selected_sites.join(', ')} (${bench_name})...`, 'stdout');
+					self.append_console(`The app will be removed in the background. Watch the live activity for progress.`, 'info');
+					self.show_live_activity(app);
+
+					let idx = 0;
+					const next = () => {
+						if (idx >= selected_sites.length) {
+							frappe.show_alert({ message: 'Uninstallation queued for all selected sites.', indicator: 'orange' });
+							return;
+						}
+						const site = selected_sites[idx];
+						self.append_console(`$ bench --site ${site} uninstall-app ${app} --yes`, 'command');
+
+						const uninstall_method = is_host ? 'bench_manager.api.uninstall_app' : 'bench_manager.api.uninstall_app_from_site_remote';
+						const uninstall_args = { site_name: site, app_name: app };
+						if (!is_host) uninstall_args.bench_path = values.bench_path;
+
+						frappe.call({ 
+							method: uninstall_method, 
+							args: uninstall_args, 
+							callback: (r) => { 
+								if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'orange' }); 
+								idx++;
+								setTimeout(next, 500);
+							} 
+						});
+					};
+					next();
+				});
+			},
 		});
 
-		this.$container.find('.app-sites').on('click', function (e) {
-			e.preventDefault();
-			const app = $(this).data('app');
-			self.show_app_sites_modal(app);
-		});
+		frappe.call({
+			method: 'bench_manager.api.get_app_sites', args: { app_name: app, bench_path: self.current_bench_path },
+			callback: (r) => {
+				const installed_sites = r.message || [];
+				if (installed_sites.length > 0) {
+					d.set_df_property('site_names', 'options', installed_sites.map(s => ({label: s, value: s})));
+					d.show();
+				} else {
+					frappe.confirm(`App <strong>${app}</strong> is not installed on any sites. Do you want to <strong>remove it from the bench entirely</strong>?`, () => {
+						const is_host = self.current_bench_path === (self.benches.find(b => b.is_host) || {}).path;
+						self.append_console(`$ bench remove-app ${app} --force`, 'command');
+						self.append_console(`Removing app ${app} from bench...`, 'stdout');
+						self.show_live_activity(app);
 
-		this.$container.find('.app-live-activity').on('click', function (e) {
-			e.preventDefault();
-			const app = $(this).data('app');
-			self.show_live_activity(app);
+						const remove_method = is_host ? 'bench_manager.api.remove_app' : 'bench_manager.api.remove_app_remote';
+						const remove_args = { app_name: app };
+						if (!is_host) remove_args.bench_path = self.current_bench_path;
+
+						frappe.call({ method: remove_method, args: remove_args, callback: (r) => { if (r.message) { frappe.show_alert({ message: r.message.message, indicator: 'red' }); setTimeout(() => self.load_apps(), 2000); } } });
+					});
+				}
+			}
 		});
 	}
 
@@ -1972,36 +2078,26 @@ class BenchDashboard {
 	}
 
 	apply_app_filter(filter) {
-		const $rows = this.$container.find('#apps-table-wrapper tbody tr');
-		if (filter === 'all') { $rows.show(); return; }
-		$rows.each(function () {
+		const $cards = this.$container.find('.app-card');
+		if (filter === 'all') { $cards.show(); return; }
+		$cards.each(function () {
 			$(this).toggle(($(this).data('source') || 'custom') === filter);
 		});
 	}
 
 	show_new_app_dialog() {
 		const self = this;
-		const FRAPPE_APPS = [
-			{ id: 'erpnext', name: 'ERPNext', desc: 'Full-featured open-source ERP for accounting, inventory, manufacturing, HR, and CRM.', repo: 'https://github.com/frappe/erpnext.git', icon: 'E', color: '#2490ef' },
-			{ id: 'builder', name: 'Frappe Builder', desc: 'Visual no-code website builder with drag-and-drop blocks and dynamic data binding.', repo: 'https://github.com/frappe/builder.git', icon: 'B', color: '#1657A1' },
-			{ id: 'crm', name: 'Frappe CRM', desc: 'Modern, open-source CRM with deal pipeline, email, calls, notes, and AI integration.', repo: 'https://github.com/frappe/crm.git', icon: 'C', color: '#D923B2' },
-			{ id: 'drive', name: 'Frappe Drive', desc: 'File storage and document management with sharing, permissions, and collaborative editing.', repo: 'https://github.com/frappe/drive.git', icon: 'D', color: '#1A737D' },
-			{ id: 'ecommerce', name: 'eCommerce Integrations', desc: 'Connectors for Shopify, WooCommerce, and other eCommerce platforms with ERPNext.', repo: 'https://github.com/frappe/ecommerce_integrations.git', icon: 'e', color: '#6A90E2' },
-			{ id: 'hrms', name: 'Frappe HR', desc: 'Modern HR and Payroll management software.', repo: 'https://github.com/frappe/hrms.git', icon: 'H', color: '#F1604B' },
-			{ id: 'lms', name: 'Frappe LMS', desc: 'Easy-to-use Learning Management System.', repo: 'https://github.com/frappe/lms.git', icon: 'L', color: '#1EAC77' },
-			{ id: 'helpdesk', name: 'Frappe Helpdesk', desc: 'Modern, streamlined customer support and issue tracking tool.', repo: 'https://github.com/frappe/helpdesk.git', icon: '?', color: '#7C3AED' },
-			{ id: 'insights', name: 'Frappe Insights', desc: 'Open-source BI tool for data exploration, dashboards, and SQL queries.', repo: 'https://github.com/frappe/insights.git', icon: 'I', color: '#0EA5E9' },
-			{ id: 'wiki', name: 'Frappe Wiki', desc: 'Simple wiki for knowledge-base management.', repo: 'https://github.com/frappe/wiki.git', icon: 'W', color: '#475569' },
-			{ id: 'print_designer', name: 'Print Designer', desc: 'Drag-and-drop visual print format designer for Frappe.', repo: 'https://github.com/frappe/print_designer.git', icon: 'P', color: '#EC4899' },
-			{ id: 'lending', name: 'Lending', desc: 'Loan management application built on top of ERPNext.', repo: 'https://github.com/frappe/lending.git', icon: '$', color: '#F59E0B' },
-		];
+		const FRAPPE_APPS = this.get_frappe_official_apps();
 
 		// Build store items HTML
 		let storeItemsHtml = '';
 		FRAPPE_APPS.forEach(app => {
+			const iconUrl = app.iconUrl || `https://raw.githubusercontent.com/frappe/${app.id}/develop/${app.id}/public/images/${app.id}-logo.svg`;
 			storeItemsHtml += `<div class="frappe-store-item" data-app-id="${app.id}" data-app-name="${app.name}" data-app-repo="${app.repo}">
 				<div class="frappe-store-item-checkbox"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" style="display:none;"><polyline points="20 6 9 17 4 12"/></svg></div>
-				<div class="frappe-store-item-icon" style="background:${app.color};">${app.icon}</div>
+				<div class="frappe-store-item-icon" style="background-color:white; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius: 8px; font-size: 24px; font-weight: bold; color: #475569;">
+					<img src="${iconUrl}" style="max-width:100%; max-height:100%; object-fit:contain;" onerror="this.replaceWith(document.createTextNode('${app.name.charAt(0).toUpperCase()}'));">
+				</div>
 				<div class="frappe-store-item-info">
 					<div class="frappe-store-item-name">${app.name}</div>
 					<div class="frappe-store-item-desc">${app.desc}</div>
@@ -2043,10 +2139,12 @@ class BenchDashboard {
 						<button class="btn btn-xs btn-default" id="store-clear-selection">Clear</button>
 					</div>
 				</div>`
-			}],
+			},
+			{ fieldtype: 'Attach Image', fieldname: 'image', label: 'App Icon' }],
 			primary_action_label: 'Create App',
 			primary_action() {
 				const activeTab = d.$wrapper.find('.new-app-dialog-tab.active').data('tab');
+				const image = d.get_value('image') || '';
 				if (activeTab === 'custom_app') {
 					const app_name = d.$wrapper.find('#custom_app_name').val();
 					if (!app_name) { frappe.msgprint('App Name is required'); return; }
@@ -2058,7 +2156,7 @@ class BenchDashboard {
 					self.show_live_activity(app_name);
 
 					const create_method = self.is_host_bench ? 'bench_manager.api.create_new_app' : 'bench_manager.api.create_new_app_on_bench';
-					const create_args = { app_name, title: d.$wrapper.find('#custom_app_title').val(), description: d.$wrapper.find('#custom_app_desc').val(), publisher: d.$wrapper.find('#custom_app_publisher').val(), email: d.$wrapper.find('#custom_app_email').val() };
+					const create_args = { app_name, title: d.$wrapper.find('#custom_app_title').val(), description: d.$wrapper.find('#custom_app_desc').val(), publisher: d.$wrapper.find('#custom_app_publisher').val(), email: d.$wrapper.find('#custom_app_email').val(), image: image };
 					if (!self.is_host_bench) create_args.bench_path = self.current_bench_path;
 
 					frappe.call({ method: create_method, args: create_args, callback: (r) => { if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' }); } });
@@ -2078,7 +2176,7 @@ class BenchDashboard {
 					self.show_live_activity('get-app');
 
 					const get_method = self.is_host_bench ? 'bench_manager.api.get_app' : 'bench_manager.api.get_app_on_bench';
-					const get_args = { git_url, branch };
+					const get_args = { git_url, branch, app_name: nameGuess, image: image };
 					if (!self.is_host_bench) get_args.bench_path = self.current_bench_path;
 
 					frappe.call({ method: get_method, args: get_args, callback: (r) => { if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' }); } });
@@ -2124,6 +2222,13 @@ class BenchDashboard {
 			$(this).addClass('active');
 			d.$wrapper.find('.new-app-tab-pane').removeClass('active');
 			d.$wrapper.find(`#dlg-tab-${tab}`).addClass('active');
+			
+			if (tab === 'frappe_store') {
+				d.set_df_property('image', 'hidden', 1);
+			} else {
+				d.set_df_property('image', 'hidden', 0);
+			}
+
 			const labels = { custom_app: 'Create App', get_app: 'Get App', frappe_store: 'Install Selected' };
 			d.$wrapper.find('.btn-primary-dark, .btn-primary').filter('.modal-footer .btn').text(labels[tab] || 'Submit');
 			try { d.get_primary_btn().text(labels[tab]); } catch (e) { }

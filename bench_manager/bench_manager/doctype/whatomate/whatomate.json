@@ -1,45 +1,51 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-05-22 12:44:06.947760",
+ "creation": "2026-06-02 16:07:01.809830",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "test_column",
-  "name1",
-  "address",
-  "are_you_like_this_feature"
+  "customer_name",
+  "phone",
+  "product",
+  "status",
+  "datetime"
  ],
  "fields": [
   {
-   "fieldname": "test_column",
-   "fieldtype": "Column Break",
-   "label": "Test"
-  },
-  {
-   "fieldname": "name1",
-   "fieldtype": "Data",
-   "label": "Name"
-  },
-  {
-   "fieldname": "address",
-   "fieldtype": "Data",
-   "label": "Address"
-  },
-  {
-   "fieldname": "are_you_like_this_feature",
+   "fieldname": "status",
    "fieldtype": "Select",
-   "label": "Are you like this Feature",
-   "options": "Yes\nNo"
+   "label": "Status",
+   "options": "Draft\nPending\nsuccess"
+  },
+  {
+   "fieldname": "datetime",
+   "fieldtype": "Datetime",
+   "label": "Date/Time"
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Customer Name"
+  },
+  {
+   "fieldname": "product",
+   "fieldtype": "Data",
+   "label": "Product"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Phone",
+   "label": "Phone"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-29 14:50:39.892760",
+ "modified": "2026-06-02 17:42:49.519629",
  "modified_by": "Administrator",
  "module": "Bench Manager",
- "name": "db-test",
+ "name": "Whatomate",
  "owner": "Administrator",
  "permissions": [
   {
