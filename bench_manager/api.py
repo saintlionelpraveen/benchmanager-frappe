@@ -977,7 +977,7 @@ def install_app(site_name, app_name):
     thread = threading.Thread(
         target=run_bench_command,
         kwargs={
-            "command_parts": ["--site", site_name, "install-app", app_name],
+            "command_parts": ["--site", site_name, "install-app", app_name, "--force"],
             "user": frappe.session.user,
             "site": frappe.local.site
         }
@@ -2228,118 +2228,6 @@ def sync_app_to_bench(app_name, target_bench_path):
     return {"status": "started", "message": f"Syncing '{app_name}' to {target_name}..."}
 
 
-@frappe.whitelist()
-def create_site_on_bench(bench_path, site_name, admin_password="admin", mariadb_root_password=""):
-    """Create a new site on any bench with realtime output."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-
-    # Validate site name has a dot (e.g., mysite.localhost)
-    if "." not in site_name:
-        frappe.throw("Site name must contain a dot (e.g., mysite.localhost)")
-
-    # Check site doesn't already exist
-    site_dir = os.path.join(bench_path, "sites", site_name)
-    if os.path.exists(site_dir):
-        frappe.throw(f"Site '{site_name}' already exists on {bench_name}")
-
-    import threading
-
-    def _run():
-        from bench_manager.utils import log_command
-        try:
-            frappe.init(frappe.local.site)
-            frappe.connect()
-        except Exception:
-            pass
-
-        def _pub(msg, t="stdout"):
-            try:
-                push_sse_event(msg, t)
-            except Exception:
-                pass
-            try:
-                frappe.publish_realtime("bench_console", {"message": msg, "msg_type": t}, room="all", after_commit=False)
-            except Exception:
-                pass
-
-        bench_exec = shutil.which("bench") or "bench"
-        cmd = [bench_exec, "new-site", site_name, "--admin-password", admin_password]
-        if mariadb_root_password:
-            cmd.extend(["--mariadb-root-password", mariadb_root_password])
-
-        command_str = f"bench new-site {site_name} (on {bench_name})"
-        _pub(f"$ {command_str}", "command")
-        _pub(f"Creating site {site_name} on {bench_name}...", "info")
-
-        try:
-            import pty, select, errno
-            env = {**os.environ, "PYTHONUNBUFFERED": "1", "TERM": "xterm-256color", "COLUMNS": "120"}
-            ansi_re = __import__("re").compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B")
-            master_fd, slave_fd = pty.openpty()
-
-            process = subprocess.Popen(
-                cmd, cwd=bench_path, stdin=subprocess.DEVNULL,
-                stdout=slave_fd, stderr=slave_fd, close_fds=True, env=env,
-            )
-            os.close(slave_fd)
-            output_lines = []
-            buffer = ""
-
-            while True:
-                try:
-                    ready, _, _ = select.select([master_fd], [], [], 1.0)
-                except (ValueError, OSError):
-                    break
-                if not ready:
-                    if process.poll() is not None:
-                        break
-                    continue
-                try:
-                    data = os.read(master_fd, 4096)
-                except OSError as e:
-                    if e.errno == errno.EIO:
-                        break
-                    raise
-                if not data:
-                    break
-                text = ansi_re.sub("", data.decode("utf-8", errors="replace"))
-                for char in text:
-                    if char in ("\n", "\r"):
-                        clean = buffer.strip()
-                        if clean:
-                            output_lines.append(clean)
-                            _pub(clean)
-                        buffer = ""
-                    else:
-                        buffer += char
-
-            if buffer.strip():
-                output_lines.append(buffer.strip())
-                _pub(buffer.strip())
-
-            try:
-                os.close(master_fd)
-            except OSError:
-                pass
-            process.wait(timeout=300)
-
-            status = "Success" if process.returncode == 0 else "Failed"
-            log_command(command_str, "\n".join(output_lines), "", status, "Administrator")
-            if status == "Success":
-                _pub(f"✓ Site '{site_name}' created on {bench_name}.", "success")
-            else:
-                _pub(f"✕ Site creation failed.", "error")
-        except Exception as e:
-            _pub(f"Error: {str(e)}", "error")
-            log_command(command_str, "", str(e), "Failed", "Administrator")
-
-    t = threading.Thread(target=_run)
-    t.daemon = True
-    t.start()
-    return {"status": "started", "message": f"Creating site '{site_name}' on {bench_name}..."}
 
 
 @frappe.whitelist()
@@ -2489,7 +2377,7 @@ def install_app_on_site_remote(bench_path, site_name, app_name):
     app_name = sanitize_input(app_name, "App Name")
     bench_name = os.path.basename(bench_path)
 
-    cmd = ["--site", site_name, "install-app", app_name]
+    cmd = ["--site", site_name, "install-app", app_name, "--force"]
     
     import threading
     from bench_manager.utils import run_bench_command
@@ -2906,7 +2794,7 @@ def create_site_on_bench(bench_path, site_name, admin_password, db_password=None
     if not admin_password:
         frappe.throw("Admin password is required")
 
-    cmd = ["new-site", site_name, "--admin-password", admin_password]
+    cmd = ["new-site", site_name, "--admin-password", admin_password, "--force"]
     if db_password:
         cmd.extend(["--db-root-password", db_password])
 
@@ -2927,6 +2815,40 @@ def create_site_on_bench(bench_path, site_name, admin_password, db_password=None
 
     return {"status": "started", "message": f"Creating site '{site_name}' on {bench_name}..."}
 
+
+@frappe.whitelist()
+def drop_site_on_bench(bench_path, site_name, db_password=None, db_root_password=None):
+    """Drop/delete a Frappe site on any bench."""
+    frappe.only_for("System Manager")
+    bench_path = _validate_bench_path(bench_path)
+    site_name = sanitize_input(site_name, "Site Name")
+    bench_name = os.path.basename(bench_path)
+    
+    site_dir = os.path.join(bench_path, "sites", site_name)
+    if not os.path.isdir(site_dir):
+        frappe.throw(f"Site directory '{site_name}' does not exist on {bench_name}")
+
+    cmd = ["drop-site", site_name, "--force", "--no-backup"]
+    # Handle both kwargs gracefully
+    pwd = db_password or db_root_password
+    if pwd:
+        cmd.extend(["--db-root-password", pwd])
+
+    import threading
+    from bench_manager.utils import run_bench_command
+    thread = threading.Thread(
+        target=run_bench_command,
+        kwargs={
+            "command_parts": cmd,
+            "bench_path": bench_path,
+            "user": frappe.session.user,
+            "site": getattr(frappe.local, "site", None)
+        }
+    )
+    thread.daemon = True
+    thread.start()
+
+    return {"status": "started", "message": f"Site deletion for '{site_name}' on {bench_name} has started."}
 
 # ─── Logs ────────────────────────────────────────────────────────────
 

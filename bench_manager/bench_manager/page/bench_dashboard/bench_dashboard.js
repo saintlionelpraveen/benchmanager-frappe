@@ -1152,67 +1152,248 @@ class BenchDashboard {
 
 	render_sites_table(sites) {
 		const $wrapper = this.$container.find('#sites-table-wrapper');
-		let html = `<table class="bench-table">
-			<thead><tr>
-				<th>Site Name</th><th>Status</th><th>Apps</th><th style="width: 50px;"></th>
-			</tr></thead><tbody>`;
+		if (!sites || !sites.length) {
+			$wrapper.html(`
+				<div class="empty-state">
+					<img src="/assets/bench_manager/images/empty_sites.png" alt="Empty" style="max-width: 140px; margin-bottom: 20px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));" onerror="this.style.display='none'">
+					<h3 style="margin-bottom: 8px;">No Sites Found</h3>
+					<p style="color: #64748b;">Create your first Frappe site to get started.</p>
+				</div>
+			`);
+			return;
+		}
+
+		let html = `<div class="site-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 28px; padding: 16px 0;">`;
+		
+		const officialApps = this.get_frappe_official_apps();
 
 		sites.forEach((site) => {
-			const badgeClass = `badge-${(site.status || 'unknown').toLowerCase()}`;
-			// The bench_manager site runs permanently — don't show Start/Stop for it
 			const isBenchManagerSite = site.site_name === (frappe.boot.sitename || '') || site.site_name === 'bench_manager.local';
 			const isActive = site.status === 'Active' || isBenchManagerSite;
 			const isInactive = site.status === 'Inactive';
-			html += `<tr data-site="${frappe.utils.escape_html(site.site_name)}">
-				<td><strong>${frappe.utils.escape_html(site.site_name)}</strong>${isBenchManagerSite ? ' <span style="font-size:10px;font-weight:600;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:6px;margin-left:4px;">ALWAYS ON</span>' : ''}</td>
-				<td><span class="badge-status ${isBenchManagerSite ? 'badge-active' : badgeClass}">${isBenchManagerSite ? 'Active' : frappe.utils.escape_html(site.status)}</span></td>
-				<td>
-					<button class="btn btn-xs btn-default show-apps-btn" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; border: 1px solid #d0d5dd; color: #344054; background: #fff; cursor: pointer; transition: all 0.2s ease;">
-						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: -2px;"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-						Show Apps
-					</button>
-				</td>
-				<td style="text-align: right;">
-					<div class="dropdown">
-						<a href="#" data-toggle="dropdown" class="text-muted" style="padding: 4px; display: inline-block; box-shadow: none;">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-						</a>
-						<ul class="dropdown-menu dropdown-menu-right" style="min-width: 180px; padding: 6px 0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-							${!isBenchManagerSite && isInactive ? `<li><a class="dropdown-item site-start" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">▶ Start</a></li>` : ''}
-							${!isBenchManagerSite && isActive ? `<li><a class="dropdown-item site-stop" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">■ Stop</a></li>` : ''}
-							${isActive ? `<li><a class="dropdown-item site-open" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" data-status="${site.status}" style="padding: 8px 16px; display: block;">↗ Open Site</a></li>` : ''}
-							<li><a class="dropdown-item site-live-activity" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">⚡ Live Activity</a></li>
-							<li class="divider" style="margin: 4px 0;"></li>
-							<li><a class="dropdown-item site-migrate" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">Migrate</a></li>
-							<li><a class="dropdown-item site-backup" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; display: block;">Backup</a></li>
-							<li><a class="dropdown-item site-maintenance" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" data-mode="${site.status === 'Maintenance' ? '0' : '1'}" style="padding: 8px 16px; display: block;">${site.status === 'Maintenance' ? 'Disable Maint.' : 'Maintenance'}</a></li>
-							${!isBenchManagerSite ? `<li class="divider" style="margin: 4px 0;"></li>
-							<li><a class="dropdown-item site-drop text-danger" href="#" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 8px 16px; color: #dc3545; display: block;">✕ Drop Site</a></li>` : ''}
-						</ul>
+			
+			const statusColor = isActive ? '#10b981' : (isInactive ? '#94a3b8' : '#f59e0b');
+			const badgeBg = isActive ? 'rgba(16, 185, 129, 0.1)' : (isInactive ? 'rgba(148, 163, 184, 0.1)' : 'rgba(245, 158, 11, 0.1)');
+			const badgeText = isBenchManagerSite ? 'Active' : frappe.utils.escape_html(site.status);
+			
+			const alwaysOnBadge = isBenchManagerSite ? `<span style="font-size:10px;font-weight:700;background:linear-gradient(135deg, #3b82f6, #6366f1);color:white;padding:4px 10px;border-radius:12px;margin-left:8px;box-shadow:0 4px 12px rgba(99,102,241,0.3);letter-spacing:0.5px;text-transform:uppercase;">⚡ ALWAYS ON</span>` : '';
+			
+			const cardBorder = isBenchManagerSite ? 'border: 1px solid rgba(59, 130, 246, 0.3);' : (isActive ? 'border: 1px solid rgba(16, 185, 129, 0.3);' : 'border: 1px solid var(--border-light);');
+			const cardBg = isBenchManagerSite ? 'background: linear-gradient(145deg, var(--card-bg), rgba(59, 130, 246, 0.03));' : (isActive ? 'background: linear-gradient(145deg, var(--card-bg), rgba(16, 185, 129, 0.03));' : 'background: var(--card-bg);');
+			const cardGlow = isBenchManagerSite ? 'box-shadow: 0 10px 40px rgba(59, 130, 246, 0.08);' : (isActive ? 'box-shadow: 0 10px 40px rgba(16, 185, 129, 0.08);' : 'box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);');
+			
+			const statusDotHtml = isActive ? `<div class="status-pulse-dot" style="width: 10px; height: 10px; border-radius: 50%; background-color: ${statusColor}; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse-green 2s infinite;"></div>` : `<div style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid ${statusColor}; background-color: transparent;"></div>`;
+
+			// App Avatars
+			let avatarsHtml = '';
+			if (site.apps && site.apps.length > 0) {
+				const maxVisible = 3;
+				const appsToShow = site.apps.slice(0, maxVisible);
+				const extraCount = site.apps.length - maxVisible;
+				
+				avatarsHtml = `<div class="site-app-avatars app-data-trigger" data-site="${frappe.utils.escape_html(site.site_name)}" style="display: flex; align-items: center; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer;" title="View installed apps">`;
+				
+				appsToShow.forEach((app, i) => {
+					const app_name = typeof app === 'string' ? app : (app.app_name || app);
+					const officialApp = officialApps.find(o => o.id === app_name);
+					let iconUrl = '/assets/frappe/images/frappe-framework-logo.svg';
+					if (officialApp && officialApp.iconUrl) {
+						iconUrl = officialApp.iconUrl;
+					} else {
+						iconUrl = `https://raw.githubusercontent.com/frappe/${app_name}/develop/${app_name}/public/logo.png`;
+					}
+					
+					const letter = app_name.charAt(0).toUpperCase();
+					const zIndex = 10 - i;
+					const marginLeft = i > 0 ? '-14px' : '0';
+					
+					// Generate a consistent random-ish gradient background for initials
+					const hues = [210, 280, 150, 320, 40, 190];
+					const hue = hues[app_name.length % hues.length];
+					const fallbackBg = `linear-gradient(135deg, hsl(${hue}, 80%, 90%), hsl(${hue}, 70%, 80%))`;
+					const fallbackColor = `hsl(${hue}, 80%, 30%)`;
+					
+					avatarsHtml += `
+					<div class="avatar-circle" style="width: 36px; height: 36px; border-radius: 50%; border: 2.5px solid var(--card-bg); box-shadow: 0 4px 10px rgba(0,0,0,0.06); margin-left: ${marginLeft}; z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: var(--card-bg); transition: transform 0.2s, z-index 0s;">
+						<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: ${fallbackColor}; background: ${fallbackBg};">
+							<img src="${iconUrl}" style="width: 100%; height: 100%; object-fit: cover; background: var(--card-bg);" onerror="this.replaceWith(document.createTextNode('${letter}'));">
+						</div>
+					</div>`;
+				});
+				
+				if (extraCount > 0) {
+					avatarsHtml += `
+					<div class="avatar-circle" style="width: 36px; height: 36px; border-radius: 50%; background: var(--bg-light-gray); border: 2.5px solid var(--card-bg); box-shadow: 0 4px 10px rgba(0,0,0,0.06); margin-left: -14px; z-index: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text-color); transition: transform 0.2s;">
+						+${extraCount}
+					</div>`;
+				}
+				avatarsHtml += `</div>`;
+			} else {
+				avatarsHtml = `<div class="site-app-avatars-async" data-site="${frappe.utils.escape_html(site.site_name)}" style="display: flex; align-items: center; padding: 6px 12px; background: var(--bg-light-gray); border-radius: 20px;"><span style="font-size: 12px; font-weight: 500; color: var(--text-muted); display: flex; align-items: center; gap: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="spin-icon"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Loading apps...</span></div>`;
+			}
+
+			// Hover Actions — on remote benches, always show Open icon (click auto-starts server)
+			const showOpenBtn = isActive || !self.is_host_bench;
+			const hoverActions = `
+				<div class="site-card-hover-actions" style="display: flex; gap: 8px;">
+					${showOpenBtn ? `<a href="#" class="site-open icon-btn" data-site="${frappe.utils.escape_html(site.site_name)}" title="Open Site" style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; color: var(--text-color); background: var(--bg-light-gray); transition: all 0.2s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : ''}
+					<a href="#" class="site-live-activity icon-btn" data-site="${frappe.utils.escape_html(site.site_name)}" title="Terminal" style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; color: var(--text-color); background: var(--bg-light-gray); transition: all 0.2s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></a>
+				</div>
+			`;
+
+			html += `
+			<div class="site-card premium-card" data-site="${frappe.utils.escape_html(site.site_name)}" style="padding: 24px; border-radius: 20px; display: flex; flex-direction: column; justify-content: space-between; min-height: 230px; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); position: relative; ${cardBorder} ${cardBg} ${cardGlow}">
+				<div class="site-card-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+					<div style="flex: 1; min-width: 0;">
+						<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+							${statusDotHtml}
+							<h4 style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text-color); letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${frappe.utils.escape_html(site.site_name)}</h4>
+						</div>
+						<div style="display: flex; align-items: center; margin-top: 8px;">
+							<span style="font-size: 11px; font-weight: 700; color: ${statusColor}; background: ${badgeBg}; padding: 4px 10px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">${badgeText}</span>
+							${alwaysOnBadge}
+						</div>
 					</div>
-				</td>
-			</tr>`;
+					
+					<div class="site-actions-wrapper" style="display: flex; align-items: center; gap: 4px; margin-left: 12px;">
+						${hoverActions}
+						<div class="site-hidden-actions" style="display: none;">
+							${!isBenchManagerSite && isInactive ? `<a href="#" class="site-start" data-site="${frappe.utils.escape_html(site.site_name)}">Start</a>` : ''}
+							${!isBenchManagerSite && isActive ? `<a href="#" class="site-stop" data-site="${frappe.utils.escape_html(site.site_name)}">Stop</a>` : ''}
+							<a href="#" class="site-migrate" data-site="${frappe.utils.escape_html(site.site_name)}">Migrate</a>
+							<a href="#" class="site-backup" data-site="${frappe.utils.escape_html(site.site_name)}">Backup</a>
+							<a href="#" class="site-maintenance" data-site="${frappe.utils.escape_html(site.site_name)}" data-mode="${site.status === 'Maintenance' ? '0' : '1'}">Maintenance</a>
+							${!isBenchManagerSite ? `<a href="#" class="site-drop" data-site="${frappe.utils.escape_html(site.site_name)}">Drop Site</a>` : ''}
+						</div>
+					</div>
+				</div>
+				
+				<div class="site-card-body" style="margin-top: auto; padding-top: 24px;">
+					<div style="font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px; letter-spacing: 0.5px; text-transform: uppercase;">Installed Apps</div>
+					<div class="site-apps-preview">
+						${avatarsHtml}
+					</div>
+				</div>
+			</div>`;
 		});
 
-		html += '</tbody></table>';
+		html += '</div>';
 		$wrapper.html(html);
 		this.bind_site_row_actions();
+		this.init_async_apps();
+		this.init_site_card_clicks();
+	}
+
+	init_async_apps() {
+		const self = this;
+		const officialApps = this.get_frappe_official_apps();
+		this.$container.find('.site-app-avatars-async').each(function() {
+			const $container = $(this);
+			const site = $container.data('site');
+			
+			const args = { site_name: site };
+			if (!self.is_host_bench) {
+				args.bench_path = self.current_bench_path;
+			}
+			
+			frappe.call({
+				method: 'bench_manager.api.get_site_apps',
+				args: args,
+				callback: (r) => {
+					const apps = r.message || [];
+					if (apps.length > 0) {
+						let newHtml = `<div class="site-app-avatars app-data-trigger" data-site="${frappe.utils.escape_html(site)}" style="display: flex; align-items: center; transition: transform 0.2s ease; cursor: pointer;" title="View installed apps">`;
+						const maxVisible = 2;
+						const appsToShow = apps.slice(0, maxVisible);
+						const extraCount = apps.length - maxVisible;
+						appsToShow.forEach((app, i) => {
+							const app_name = app.app_name;
+							const officialApp = officialApps.find(o => o.id === app_name);
+							let iconUrl = '/assets/frappe/images/frappe-framework-logo.svg';
+							if (officialApp && officialApp.iconUrl) {
+								iconUrl = officialApp.iconUrl;
+							} else {
+								iconUrl = `https://raw.githubusercontent.com/frappe/${app_name}/develop/${app_name}/public/logo.png`;
+							}
+							const letter = app_name.charAt(0).toUpperCase();
+							const zIndex = 10 - i;
+							const marginLeft = i > 0 ? '-12px' : '0';
+							newHtml += `<div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--card-bg); box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-left: ${marginLeft}; z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background-color: var(--card-bg);"><div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: var(--text-color);"><img src="${iconUrl}" style="max-width: 70%; max-height: 70%; object-fit: contain;" onerror="this.replaceWith(document.createTextNode('${letter}'));"></div></div>`;
+						});
+						if (extraCount > 0) {
+							newHtml += `<div style="width: 32px; height: 32px; border-radius: 50%; background: var(--bg-light-gray); border: 2px solid var(--card-bg); box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-left: -12px; z-index: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--text-color);">+${extraCount}</div>`;
+						}
+						newHtml += `</div>`;
+						$container.replaceWith(newHtml);
+					} else {
+						$container.html(`<span style="font-size: 12px; color: #94a3b8; font-style: italic;">No apps</span>`);
+					}
+				}
+			});
+		});
+	}
+
+	init_site_card_clicks() {
+		const self = this;
+		this.$container.find('.site-card').css('cursor', 'pointer').on('click', function(e) {
+			if ($(e.target).closest('.icon-btn, .show-apps-btn, .site-app-avatars').length) return;
+			const site_name = $(this).data('site');
+			const $card = $(this);
+			const isBenchManagerSite = site_name === (frappe.boot.sitename || '') || site_name === 'bench_manager.local';
+			const isInactive = $card.find('.status-dot-active').length === 0 && !isBenchManagerSite;
+			const isActive = !isInactive;
+			
+			const d = new frappe.ui.Dialog({
+				title: 'Manage Site',
+				fields: [
+					{
+						fieldtype: 'HTML',
+						fieldname: 'actions_html',
+						options: `
+						<div style="display: flex; flex-direction: column; gap: 8px;">
+							<div style="margin-bottom: 12px; font-weight: bold; font-size: 16px; color: var(--text-color);">${frappe.utils.escape_html(site_name)}</div>
+							${!isBenchManagerSite && isInactive ? `<button class="btn btn-default text-left modal-site-start" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: var(--status-green); font-size: 18px;">▶</span> Start Site</button>` : ''}
+							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: #f59e0b; font-size: 18px;">■</span> Stop Site</button>` : ''}
+							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🔄 Migrate Site</button>
+							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">💾 Backup Database</button>
+							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🛠 Toggle Maintenance Mode</button>
+							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;">✕ Drop Site</button>` : ''}
+						</div>
+						`
+					}
+				]
+			});
+			d.show();
+			d.$wrapper.find('.modal-dialog').css('max-width', '400px');
+			
+			d.$wrapper.find('.modal-site-start').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-start').click(), 250); });
+			d.$wrapper.find('.modal-site-stop').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-stop').click(), 250); });
+			d.$wrapper.find('.modal-site-migrate').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-migrate').click(), 250); });
+			d.$wrapper.find('.modal-site-backup').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-backup').click(), 250); });
+			d.$wrapper.find('.modal-site-maintenance').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-maintenance').click(), 250); });
+			d.$wrapper.find('.modal-site-drop').hover(function(){$(this).css('background', '#fef2f2').css('border-color', '#fca5a5')}, function(){$(this).css('background', '#fef2f2').css('border-color', '#fee2e2')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-drop').click(), 250); });
+		});
 	}
 
 	bind_site_row_actions() {
 		const self = this;
 
-		// Show Apps dialog
-		this.$container.find('.show-apps-btn').on('click', function (e) {
+		// Show Apps dialog (Event delegation since avatars load async)
+		this.$container.off('click', '.app-data-trigger').on('click', '.app-data-trigger', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			const $btn = $(this);
 			const originalHtml = $btn.html();
 			$btn.html('<span style="font-size: 12px;">Loading...</span>').prop('disabled', true);
 
+			const args = { site_name: site };
+			if (!self.is_host_bench) {
+				args.bench_path = self.current_bench_path;
+			}
+
 			frappe.call({
 				method: 'bench_manager.api.get_site_apps',
-				args: { site_name: site },
+				args: args,
 				callback: (r) => {
 					$btn.html(originalHtml).prop('disabled', false);
 					const apps = r.message || [];
@@ -1255,15 +1436,18 @@ class BenchDashboard {
 			});
 		});
 
-		this.$container.find('.site-start').on('click', function (e) {
+		this.$container.off('click', '.site-start').on('click', '.site-start', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			self.append_console(`Starting dev server for ${site}...`, 'command');
 			frappe.show_alert({ message: `Starting ${site}...`, indicator: 'blue' });
 
+			const method = self.is_host_bench ? 'bench_manager.api.start_site_server' : 'bench_manager.api.start_site_server_on_bench';
+			const args = self.is_host_bench ? { site_name: site } : { bench_path: self.current_bench_path, site_name: site };
+
 			frappe.call({
-				method: 'bench_manager.api.start_site_server',
-				args: { site_name: site },
+				method: method,
+				args: args,
 				callback: (r) => {
 					const result = r.message;
 					if (result.status === 'already_running') {
@@ -1280,15 +1464,18 @@ class BenchDashboard {
 			});
 		});
 
-		this.$container.find('.site-stop').on('click', function (e) {
+		this.$container.off('click', '.site-stop').on('click', '.site-stop', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			self.append_console(`Stopping site server for ${site}...`, 'command');
 			frappe.show_alert({ message: `Stopping ${site}...`, indicator: 'orange' });
 
+			const method = self.is_host_bench ? 'bench_manager.api.stop_site_server' : 'bench_manager.api.stop_site_server_on_bench';
+			const args = self.is_host_bench ? { site_name: site } : { bench_path: self.current_bench_path, site_name: site };
+
 			frappe.call({
-				method: 'bench_manager.api.stop_site_server',
-				args: { site_name: site },
+				method: method,
+				args: args,
 				callback: (r) => {
 					const result = r.message;
 					if (result.status === 'not_running') {
@@ -1305,8 +1492,9 @@ class BenchDashboard {
 			});
 		});
 
-		this.$container.find('.site-open').on('click', function (e) {
+		this.$container.off('click', '.site-open, .site-open-url').on('click', '.site-open, .site-open-url', function (e) {
 			e.preventDefault();
+			e.stopPropagation();
 			const site = $(this).data('site');
 			const status = $(this).data('status');
 
@@ -1317,44 +1505,65 @@ class BenchDashboard {
 
 			frappe.show_alert({ message: `Opening ${site}...`, indicator: 'blue' });
 
-			frappe.call({
-				method: 'bench_manager.api.get_site_open_url',
-				args: { site_name: site },
-				callback: (r) => {
-					const result = r.message;
-
-					if (result.is_bench_manager) {
-						// Bench manager - just reload current page in new tab
-						window.open(window.location.origin, '_blank');
-						return;
+			if (self.is_host_bench) {
+				// Host bench: use existing get_site_open_url flow
+				frappe.call({
+					method: 'bench_manager.api.get_site_open_url',
+					args: { site_name: site },
+					callback: (r) => {
+						const result = r.message;
+						if (result.is_bench_manager) {
+							window.open(window.location.origin, '_blank');
+							return;
+						}
+						if (result.url) {
+							frappe.show_alert({ message: `Opening ${site} on port ${result.port}...`, indicator: 'green' });
+							setTimeout(() => window.open(result.url, '_blank'), 500);
+						} else {
+							frappe.msgprint({
+								title: 'Site Not Running',
+								message: `<strong>${site}</strong> is not running. Please start the site first using the <b>▶ Start</b> action, then try opening it again.`,
+								indicator: 'orange'
+							});
+						}
+						setTimeout(() => self.load_sites(), 1000);
+					},
+					error: () => {
+						frappe.show_alert({ message: `Failed to get URL for ${site}`, indicator: 'red' });
 					}
-
-					if (result.url) {
-						frappe.show_alert({ message: `Opening ${site} on port ${result.port}...`, indicator: 'green' });
-						// Small delay to let the server finish starting if just started
-						setTimeout(() => window.open(result.url, '_blank'), 500);
-					} else {
-						// Site is not running - prompt user to start it first
-						frappe.msgprint({
-							title: 'Site Not Running',
-							message: `<strong>${site}</strong> is not running. Please start the site first using the <b>▶ Start</b> action, then try opening it again.`,
-							indicator: 'orange'
-						});
+				});
+			} else {
+				// Remote bench: auto-start a dev server if not already running, then open
+				frappe.call({
+					method: 'bench_manager.api.start_site_server_on_bench',
+					args: { bench_path: self.current_bench_path, site_name: site },
+					callback: (r) => {
+						const result = r.message;
+						const port = result.port;
+						if (result.status === 'already_running') {
+							frappe.show_alert({ message: `${site} is running on port ${port}. Opening...`, indicator: 'green' });
+							setTimeout(() => window.open(`http://127.0.0.1:${port}`, '_blank'), 300);
+						} else {
+							self.append_console(`Starting dev server for ${site} on port ${port}...`, 'command');
+							frappe.show_alert({ message: `Started ${site} on port ${port}. Opening in a moment...`, indicator: 'green' });
+							// Give the server a few seconds to boot up before navigating
+							setTimeout(() => window.open(`http://127.0.0.1:${port}`, '_blank'), 3000);
+						}
+						setTimeout(() => self.load_sites(), 1500);
+					},
+					error: () => {
+						frappe.show_alert({ message: `Failed to start server for ${site}`, indicator: 'red' });
 					}
-					setTimeout(() => self.load_sites(), 1000);
-				},
-				error: () => {
-					frappe.show_alert({ message: `Failed to get URL for ${site}`, indicator: 'red' });
-				}
-			});
+				});
+			}
 		});
 
-		this.$container.find('.site-live-activity').on('click', function (e) {
+		this.$container.off('click', '.site-live-activity').on('click', '.site-live-activity', function (e) {
 			e.preventDefault();
 			self.show_live_activity($(this).data('site'));
 		});
 
-		this.$container.find('.site-migrate').on('click', function (e) {
+		this.$container.off('click', '.site-migrate').on('click', '.site-migrate', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			const $row = $(this).closest('tr');
@@ -1373,7 +1582,7 @@ class BenchDashboard {
 			});
 		});
 
-		this.$container.find('.site-backup').on('click', function (e) {
+		this.$container.off('click', '.site-backup').on('click', '.site-backup', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			const $row = $(this).closest('tr');
@@ -1415,7 +1624,7 @@ class BenchDashboard {
 			d.show();
 		});
 
-		this.$container.find('.site-maintenance').on('click', function (e) {
+		this.$container.off('click', '.site-maintenance').on('click', '.site-maintenance', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			const mode = $(this).data('mode');
@@ -1434,7 +1643,7 @@ class BenchDashboard {
 			});
 		});
 
-		this.$container.find('.site-drop').on('click', function (e) {
+		this.$container.off('click', '.site-drop').on('click', '.site-drop', function (e) {
 			e.preventDefault();
 			const site = $(this).data('site');
 			const $row = $(this).closest('tr');
@@ -1449,12 +1658,17 @@ class BenchDashboard {
 					d.hide();
 					$row.find('.badge-status').removeClass().addClass('badge-status badge-dropping').text('Dropping...');
 					$row.css('opacity', '0.5');
-					self.append_console(`$ bench drop-site ${site} --force --no-backup`, 'command');
+					self.append_console(`Dropping Site ${site}...`, 'command');
 					self.append_console(`Initiating site deletion for ${site}. Removing database and files...`, 'stdout');
 					self.show_live_activity(site);
+
+					const method = self.is_host_bench ? 'bench_manager.api.drop_site' : 'bench_manager.api.drop_site_on_bench';
+					const args = { site_name: site, db_root_password: values.db_root_password || null };
+					if (!self.is_host_bench) args.bench_path = self.current_bench_path;
+
 					frappe.call({
-						method: 'bench_manager.api.drop_site',
-						args: { site_name: site, db_root_password: values.db_root_password || null },
+						method: method,
+						args: args,
 						callback: (r) => {
 							if (r.message) {
 								frappe.show_alert({ message: r.message.message, indicator: 'orange' });
@@ -1587,9 +1801,8 @@ class BenchDashboard {
 					self.show_live_activity($(this).data('site'));
 				});
 
-				self.append_console(`$ bench new-site ${values.site_name} --admin-password ***`, 'command');
-				self.append_console(`Queuing site creation for ${values.site_name} on ${bench_name}...`, 'stdout');
-				self.append_console(`This will create the database, install frappe, and set up the site.`, 'info');
+				self.append_console(`Creating Site ${values.site_name}...`, 'command');
+				self.append_console(`Setting up database and installing frappe for ${values.site_name} on ${bench_name}. This may take a few minutes.`, 'info');
 				self.show_live_activity(values.site_name);
 
 				const method = is_host ? 'bench_manager.api.create_site' : 'bench_manager.api.create_site_on_bench';
@@ -1674,16 +1887,12 @@ class BenchDashboard {
 
 				apps.forEach((app) => {
 					let source = 'custom';
-					let badgeHtml = '<span class="app-card-source-badge badge-custom">Custom</span>';
-
 					const official_apps = ['frappe', 'erpnext', 'hrms', 'lms', 'builder', 'helpdesk', 'gamecenter', 'wiki', 'insights', 'crm', 'print_designer', 'desk', 'payments', 'ecommerce_integrations'];
 
 					if (official_apps.includes(app.app_name) || (app.git_url && app.git_url.includes('github.com/frappe/'))) {
 						source = 'frappe_store';
-						badgeHtml = '<span class="app-card-source-badge badge-frappe">Frappe Store</span>';
 					} else if (app.git_url) {
 						source = 'git';
-						badgeHtml = '<span class="app-card-source-badge badge-git">Git</span>';
 					}
 
 					let imgUrl = '/assets/frappe/images/frappe-framework-logo.svg';
@@ -1718,7 +1927,6 @@ class BenchDashboard {
 							<div class="app-card-tags">
 								<span class="app-card-tag">${frappe.utils.escape_html(app.branch || 'master')}</span>
 							</div>
-							${badgeHtml}
 						</div>
 					</div>`;
 				});
@@ -1872,7 +2080,7 @@ class BenchDashboard {
 								return;
 							}
 							const site = selected_sites[idx];
-							self.append_console(`$ bench --site ${site} install-app ${app}`, 'command');
+							self.append_console(`Installing ${app} on ${site}...`, 'command');
 
 							const install_method = is_host ? 'bench_manager.api.install_app' : 'bench_manager.api.install_app_on_site_remote';
 							const install_args = { site_name: site, app_name: app };
@@ -1940,7 +2148,7 @@ class BenchDashboard {
 							return;
 						}
 						const site = selected_sites[idx];
-						self.append_console(`$ bench --site ${site} uninstall-app ${app} --yes`, 'command');
+						self.append_console(`Uninstalling ${app} from ${site}...`, 'command');
 
 						const uninstall_method = is_host ? 'bench_manager.api.uninstall_app' : 'bench_manager.api.uninstall_app_from_site_remote';
 						const uninstall_args = { site_name: site, app_name: app };
@@ -1971,7 +2179,7 @@ class BenchDashboard {
 				} else {
 					frappe.confirm(`App <strong>${app}</strong> is not installed on any sites. Do you want to <strong>remove it from the bench entirely</strong>?`, () => {
 						const is_host = self.current_bench_path === (self.benches.find(b => b.is_host) || {}).path;
-						self.append_console(`$ bench remove-app ${app} --force`, 'command');
+						self.append_console(`Removing app ${app} from bench...`, 'command');
 						self.append_console(`Removing app ${app} from bench...`, 'stdout');
 						self.show_live_activity(app);
 
@@ -2046,7 +2254,7 @@ class BenchDashboard {
 						const site = $(e.currentTarget).data('site');
 						d.hide();
 						frappe.confirm(`Uninstall <strong>${app_name}</strong> from <strong>${site}</strong>?`, () => {
-							self.append_console(`$ bench --site ${site} uninstall-app ${app_name} --yes`, 'command');
+							self.append_console(`Uninstalling ${app_name} from ${site}...`, 'command');
 							self.append_console(`Uninstalling ${app_name} from ${site}...`, 'stdout');
 							self.append_console(`The app will be removed in the background. Watch the live activity for progress.`, 'info');
 							self.show_live_activity(app_name);
@@ -2150,7 +2358,7 @@ class BenchDashboard {
 					if (!app_name) { frappe.msgprint('App Name is required'); return; }
 					d.hide();
 					self.add_pending_app_row(app_name, 'custom', 'Creating app...');
-					self.append_console(`$ bench new-app --no-git ${app_name}`, 'command');
+					self.append_console(`Creating new Frappe app "${app_name}"...`, 'command');
 					self.append_console(`Creating new Frappe app "${app_name}" on ${self.current_bench_name || 'host'}...`, 'stdout');
 					self.append_console(`Scaffolding app directory, hooks, and module structure. Watch below for progress.`, 'info');
 					self.show_live_activity(app_name);
@@ -2170,7 +2378,7 @@ class BenchDashboard {
 
 					d.hide();
 					self.add_pending_app_row(nameGuess, 'git', 'Cloning...');
-					self.append_console(`$ bench get-app ${git_url} --branch ${branch}`, 'command');
+					self.append_console(`Cloning app from ${git_url}...`, 'command');
 					self.append_console(`Cloning repository and installing app on ${self.current_bench_name || 'host'}. This may take a few minutes...`, 'stdout');
 					self.append_console(`The app will be cloned, dependencies installed, and assets built. Watch below for progress.`, 'info');
 					self.show_live_activity('get-app');
@@ -2196,7 +2404,7 @@ class BenchDashboard {
 							return;
 						}
 						const a = sel[idx];
-						self.append_console(`[${idx + 1}/${sel.length}] $ bench get-app ${a.repo}`, 'command');
+						self.append_console(`Installing ${a.name}...`, 'command');
 						self.append_console(`Fetching ${a.name} onto ${self.current_bench_name || 'host'}...`, 'stdout');
 						self.show_live_activity('frappe-store');
 
@@ -2298,7 +2506,7 @@ class BenchDashboard {
 
 		this.$container.find('#btn-bench-update').on('click', () => {
 			frappe.confirm('Run <strong>bench update</strong>? This will update all apps.', () => {
-				self.append_console('Running bench update...', 'command');
+				self.append_console(`Updating ${self.current_bench_path}...`, 'command');
 				frappe.call({
 					method: 'bench_manager.api.update_bench',
 					callback: (r) => {
@@ -2345,30 +2553,118 @@ class BenchDashboard {
 		});
 	}
 
+	get_human_readable_command(commandStr) {
+		if (!commandStr) return 'System Task';
+		
+		let cmd = commandStr.startsWith('$ ') ? commandStr.slice(2) : commandStr;
+		cmd = cmd.replace(/^bench\s+/, '');
+		const parts = cmd.split(' ');
+		
+		if (parts[0] === 'new-app') return `Creating App '${parts[parts.length - 1]}'`;
+		if (parts[0] === 'get-app') {
+			const target = parts.find(p => !p.startsWith('-') && p !== 'get-app');
+			return `Fetching App '${target || 'from repository'}'`;
+		}
+		if (parts[0] === 'remove-app') {
+			const target = parts.find(p => !p.startsWith('-') && p !== 'remove-app');
+			return `Removing App '${target || ''}'`;
+		}
+		if (parts[0] === 'drop-site') {
+			const target = parts.find(p => !p.startsWith('-') && p !== 'drop-site');
+			return `Deleting Site '${target || ''}'`;
+		}
+		if (parts[0] === 'new-site') {
+			const target = parts.find(p => !p.startsWith('-') && p !== 'new-site');
+			return `Creating Site '${target || ''}'`;
+		}
+		if (parts[0] === 'update') return `Updating Bench`;
+		if (parts[0] === 'migrate') return `Migrating Bench Databases`;
+		if (parts[0] === 'backup' || parts[0] === 'backup-all-sites') return `Backing Up Sites`;
+		if (parts[0] === 'restart') return `Restarting Bench Services`;
+		if (parts[0] === 'clear-cache') return `Clearing Cache`;
+		if (parts[0] === 'serve') return `Starting Development Server`;
+		
+		if (parts[0] === '--site' || parts[0] === '-site') {
+			const site = parts[1];
+			const action = parts[2];
+			
+			if (action === 'install-app') {
+				const app = parts.find((p, i) => i > 2 && !p.startsWith('-'));
+				return `Installing App '${app}' on '${site}'`;
+			}
+			if (action === 'uninstall-app') {
+				const app = parts.find((p, i) => i > 2 && !p.startsWith('-'));
+				return `Uninstalling App '${app}' from '${site}'`;
+			}
+			if (action === 'migrate') return `Migrating Site '${site}'`;
+			if (action === 'backup') return `Backing Up Site '${site}'`;
+			if (action === 'clear-cache') return `Clearing Cache for '${site}'`;
+			
+			return `Running '${action}' on '${site}'`;
+		}
+		
+		return commandStr;
+	}
+
 	render_logs_table(logs) {
 		const $wrapper = this.$container.find('#logs-table-wrapper');
-		let html = `<table class="bench-table">
-			<thead><tr>
-				<th>Time</th><th>Command</th><th>Status</th><th>User</th><th>Details</th>
-			</tr></thead><tbody>`;
+		$wrapper.removeClass('bench-table-wrapper').addClass('logs-modern-wrapper');
+		
+		let html = `<div class="logs-modern-list">`;
 
 		logs.forEach((log) => {
-			const badgeClass = `badge-${(log.status || 'unknown').toLowerCase()}`;
+			const status = (log.status || 'unknown').toLowerCase();
+			const badgeClass = `badge-${status}`;
 			const time = frappe.datetime.prettyDate(log.creation);
-			const command = (log.command || '').length > 60
-				? log.command.substring(0, 60) + '...'
-				: log.command || '';
+			const rawCommand = log.command || '';
+			const humanName = this.get_human_readable_command(rawCommand);
+			
+			let statusIcon = '';
+			let iconClass = '';
+			
+			if (status === 'success') {
+				statusIcon = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
+				iconClass = 'icon-success';
+			} else if (status === 'failed' || status === 'error') {
+				statusIcon = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`;
+				iconClass = 'icon-failed';
+			} else if (status === 'running' || status === 'pending') {
+				statusIcon = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin-animation 2s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="4.93" x2="19.07" y2="7.76"></line></svg>`;
+				iconClass = 'icon-running';
+			} else {
+				statusIcon = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+				iconClass = 'icon-unknown';
+			}
 
-			html += `<tr>
-				<td><small>${frappe.utils.escape_html(time)}</small></td>
-				<td><code style="font-size:11px;">${frappe.utils.escape_html(command)}</code></td>
-				<td><span class="badge-status ${badgeClass}">${frappe.utils.escape_html(log.status || 'Unknown')}</span></td>
-				<td><small>${frappe.utils.escape_html(log.executed_by || '—')}</small></td>
-				<td><a href="/app/bench-command-log/${log.name}" class="btn btn-xs btn-default">View</a></td>
-			</tr>`;
+			html += `<div class="log-modern-item">
+				<div class="log-modern-icon ${iconClass}">
+					${statusIcon}
+				</div>
+				<div class="log-modern-content">
+					<div class="log-modern-header">
+						<h4 class="log-modern-title" title="${frappe.utils.escape_html(humanName)}">${frappe.utils.escape_html(humanName)}</h4>
+						<span class="log-modern-time">${frappe.utils.escape_html(time)}</span>
+					</div>
+					<div class="log-modern-meta">
+						<code class="log-modern-raw-command" title="${frappe.utils.escape_html(rawCommand)}">${frappe.utils.escape_html(rawCommand)}</code>
+						<span class="log-modern-meta-divider"></span>
+						<span class="log-modern-user">
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: -2px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+							${frappe.utils.escape_html(log.executed_by || '—')}
+						</span>
+						<span class="badge-status ${badgeClass}" style="margin-left: auto;">${frappe.utils.escape_html(log.status || 'Unknown')}</span>
+					</div>
+				</div>
+				<div class="log-modern-actions">
+					<a href="/app/bench-command-log/${log.name}" class="log-modern-view-btn">
+						<span>Details</span>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+					</a>
+				</div>
+			</div>`;
 		});
 
-		html += '</tbody></table>';
+		html += '</div>';
 		$wrapper.html(html);
 	}
 
