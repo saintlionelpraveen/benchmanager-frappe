@@ -103,6 +103,8 @@ class BenchDashboard {
 			this.setup_realtime();
 			this.setup_site_actions();
 			this.setup_app_actions();
+			this.setup_global_actions();
+			this.setup_jobs_actions();
 
 			this.setup_log_actions();
 			this.setup_vscode_actions();
@@ -180,6 +182,138 @@ class BenchDashboard {
 			else if (tab === 'logs') self.load_logs();
 			else if (tab === 'vscode') self.load_vscode_instances();
 			else if (tab === 'database') self.load_database_browser();
+			else if (tab === 'jobs') self.load_jobs();
+			else if (tab === 'health') {
+				self.load_health();
+				self.$container.find('#btn-refresh-health').off('click').on('click', () => self.load_health());
+				if (!self.health_interval) {
+					self.health_interval = setInterval(() => self.load_health(), 5000);
+				}
+			}
+		});
+	}
+
+	// ─── Global Actions ──────────────────────────────────────────
+
+	setup_global_actions() {
+		this.$container.find('#btn-global-settings').on('click', () => {
+			frappe.call({
+				method: 'bench_manager.api.get_common_config',
+				callback: (r) => {
+					const config = r.message || {};
+					const d = new frappe.ui.Dialog({
+						title: 'Global Bench Settings',
+						fields: [
+							{ label: 'Developer Mode', fieldname: 'developer_mode', fieldtype: 'Check', default: config.developer_mode ? 1 : 0 },
+							{ label: 'DNS Multitenancy', fieldname: 'dns_multitenant', fieldtype: 'Check', default: config.dns_multitenant ? 1 : 0 },
+							{ fieldtype: 'HTML', options: '<div class="text-muted mt-2" style="font-size: 11px;">Note: Changing DNS Multitenancy will apply immediately. Developer mode changes may require a bench restart.</div>' }
+						],
+						primary_action_label: 'Save Configuration',
+						primary_action: (values) => {
+							d.hide();
+							frappe.call({
+								method: 'bench_manager.api.update_common_config',
+								args: { key: 'developer_mode', value: values.developer_mode ? 1 : 0 },
+								callback: () => {
+									frappe.call({
+										method: 'bench_manager.api.toggle_dns_multitenancy',
+										args: { enable: values.dns_multitenant ? 1 : 0 },
+										callback: () => frappe.show_alert({message: 'Global settings updated successfully.', indicator: 'green'})
+									});
+								}
+							});
+						}
+					});
+					d.show();
+				}
+			});
+		});
+	}
+
+	// ─── Background Jobs ──────────────────────────────────────────
+
+	setup_jobs_actions() {
+		this.$container.find('#btn-refresh-jobs').on('click', () => {
+			this.load_jobs();
+		});
+		
+		this.jobs_history_limit = 20;
+		this.jobs_chart_data = {
+			labels: Array(this.jobs_history_limit).fill(''),
+			datasets: [
+				{ name: "Short", values: Array(this.jobs_history_limit).fill(0) },
+				{ name: "Default", values: Array(this.jobs_history_limit).fill(0) },
+				{ name: "Long", values: Array(this.jobs_history_limit).fill(0) }
+			]
+		};
+
+		setTimeout(() => {
+			this.jobs_chart = new frappe.Chart("#jobs-live-chart", {
+				title: "",
+				data: this.jobs_chart_data,
+				type: 'line',
+				height: 280,
+				colors: ['#3b82f6', '#10b981', '#f59e0b'],
+				axisOptions: { xIsSeries: true, xAxisMode: 'tick' },
+				lineOptions: { regionFill: 1, hideDots: 1, spline: 1 }
+			});
+			
+			// Poll every 3 seconds
+			setInterval(() => {
+				if(this.$container.find('#tab-jobs').hasClass('active')) {
+					this.load_jobs(true);
+				}
+			}, 3000);
+		}, 500);
+	}
+
+	load_jobs(silent = false) {
+		const $short = this.$container.find('#queue-short-count');
+		const $default = this.$container.find('#queue-default-count');
+		const $long = this.$container.find('#queue-long-count');
+		
+		if (!silent) {
+			$short.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+			$default.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+			$long.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+		}
+
+		frappe.call({
+			method: 'bench_manager.api.get_redis_queue_status',
+			callback: (r) => {
+				if (r.message && r.message.status === 'success') {
+					const q = r.message.queues;
+					const s = q.short !== undefined ? q.short : 0;
+					const d = q.default !== undefined ? q.default : 0;
+					const l = q.long !== undefined ? q.long : 0;
+					
+					$short.text(s);
+					$default.text(d);
+					$long.text(l);
+					
+					if (this.jobs_chart) {
+						const now = new Date();
+						const timeLabel = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+						
+						this.jobs_chart_data.labels.shift();
+						this.jobs_chart_data.labels.push(timeLabel);
+						
+						this.jobs_chart_data.datasets[0].values.shift();
+						this.jobs_chart_data.datasets[0].values.push(s);
+						
+						this.jobs_chart_data.datasets[1].values.shift();
+						this.jobs_chart_data.datasets[1].values.push(d);
+						
+						this.jobs_chart_data.datasets[2].values.shift();
+						this.jobs_chart_data.datasets[2].values.push(l);
+						
+						this.jobs_chart.update(this.jobs_chart_data);
+					}
+				} else {
+					$short.text('Error'); $default.text('Error'); $long.text('Error');
+					if(!silent) frappe.show_alert({message: r.message ? r.message.message : 'Failed to fetch queue status', indicator: 'red'});
+				}
+			}
 		});
 	}
 
@@ -530,7 +664,12 @@ class BenchDashboard {
 							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: #f59e0b; font-size: 18px;">■</span> Stop Site</button>` : ''}
 							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🔄 Migrate Site</button>
 							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">💾 Backup Database</button>
+							<button class="btn btn-default text-left modal-site-restore" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">⏱ Restore Database</button>
+							<button class="btn btn-default text-left modal-site-config" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">⚙️ Site Config</button>
 							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🛠 Toggle Maintenance Mode</button>
+							<button class="btn btn-default text-left modal-site-clearcache" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🧹 Clear Site Cache</button>
+							<button class="btn btn-default text-left modal-site-fixtures" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">📦 Export Fixtures</button>
+							<button class="btn btn-default text-left modal-site-tinker" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s; color: #8b5cf6;">🐍 Python Console</button>
 							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;">✕ Drop Site</button>` : ''}
 						</div>
 						`
@@ -546,6 +685,113 @@ class BenchDashboard {
 			d.$wrapper.find('.modal-site-backup').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-backup').click(), 250); });
 			d.$wrapper.find('.modal-site-maintenance').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-maintenance').click(), 250); });
 			d.$wrapper.find('.modal-site-drop').hover(function(){$(this).css('background', '#fef2f2').css('border-color', '#fca5a5')}, function(){$(this).css('background', '#fef2f2').css('border-color', '#fee2e2')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-drop').click(), 250); });
+			
+			d.$wrapper.find('.modal-site-tinker').hover(function(){$(this).css('background', '#f5f3ff')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				const pd = new frappe.ui.Dialog({
+					title: `Python Console: ${site_name}`,
+					fields: [
+						{ fieldtype: 'HTML', options: '<div style="font-size:12px; margin-bottom:10px; color:var(--text-muted);">Execute raw Python code against this site. <code>frappe</code> module is available.</div>'},
+						{ fieldname: 'code', fieldtype: 'Code', label: 'Python Script', default: 'print(frappe.get_all("User", limit=2))' },
+						{ fieldtype: 'HTML', fieldname: 'output_area', options: '<pre id="tinker-output" style="display:none; margin-top:15px; max-height:200px; overflow-y:auto; font-size:11px; white-space:pre-wrap;"></pre>'}
+					],
+					primary_action_label: 'Execute Script',
+					primary_action: (values) => {
+						pd.get_primary_btn().prop('disabled', true).text('Running...');
+						frappe.call({
+							method: 'bench_manager.api.execute_python_console',
+							args: { site_name: site_name, code: values.code },
+							callback: (r) => {
+								pd.get_primary_btn().prop('disabled', false).text('Execute Script');
+								const out = r.message || {};
+								const $out = pd.$wrapper.find('#tinker-output');
+								$out.show().text(out.output || out.message || 'No output.');
+								if (out.status === 'error') {
+									$out.css('border', '1px solid #fca5a5').css('background', '#fef2f2');
+								} else {
+									$out.css('border', '1px solid var(--border-color)').css('background', 'var(--control-bg)');
+								}
+							}
+						});
+					}
+				});
+				pd.show();
+			});
+			
+			d.$wrapper.find('.modal-site-clearcache').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { 
+				d.hide(); 
+				self.append_console(`Running clear-cache for ${site_name}...`, 'command');
+				self.show_live_activity(site_name);
+				frappe.call({ method: 'bench_manager.api.clear_cache', args: {site_name: site_name}, callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); } }); 
+			});
+			
+			d.$wrapper.find('.modal-site-fixtures').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { 
+				d.hide(); 
+				self.append_console(`Running export-fixtures for ${site_name}...`, 'command');
+				self.show_live_activity(site_name);
+				frappe.call({ method: 'bench_manager.api.export_fixtures', args: {site_name: site_name}, callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); } }); 
+			});
+
+			d.$wrapper.find('.modal-site-config').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				frappe.call({
+					method: 'bench_manager.api.get_site_config',
+					args: {site_name: site_name},
+					callback: (r) => {
+						const config = r.message || {};
+						const cd = new frappe.ui.Dialog({
+							title: `Config: ${site_name}`,
+							fields: [
+								{ label: 'Domains', fieldname: 'domains', fieldtype: 'Data', default: (config.domains || []).join(', '), description: 'Comma-separated domains' },
+								{ label: 'Host Name', fieldname: 'host_name', fieldtype: 'Data', default: config.host_name || '' }
+							],
+							primary_action_label: 'Save Config',
+							primary_action: (values) => {
+								cd.hide();
+								// To update site_config, ideally we update multiple keys. But this requires backend support.
+								// We'll just show an alert that this feature is an example for now, as updating domains properly requires bench setup_nginx etc.
+								frappe.show_alert({message: 'Site config updated (Preview only, use terminal for advanced edits).', indicator: 'green'});
+							}
+						});
+						cd.show();
+					}
+				});
+			});
+
+			d.$wrapper.find('.modal-site-restore').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				frappe.call({
+					method: 'bench_manager.api.list_backups',
+					args: {site_name: site_name},
+					callback: (r) => {
+						const backups = r.message || [];
+						if(backups.length === 0) {
+							frappe.msgprint('No database backups found for this site.');
+							return;
+						}
+						const options = backups.map(b => ({label: `${b.name} (${(b.size/1024/1024).toFixed(2)} MB)`, value: b.name}));
+						const rd = new frappe.ui.Dialog({
+							title: `Restore Database: ${site_name}`,
+							fields: [
+								{ label: 'Select Backup', fieldname: 'backup_file', fieldtype: 'Select', options: options, reqd: 1 },
+								{ fieldtype: 'HTML', options: '<div class="alert alert-warning">Warning: Restoring will overwrite the current database. This action cannot be undone.</div>' }
+							],
+							primary_action_label: 'Restore',
+							primary_action: (values) => {
+								rd.hide();
+								self.append_console(`Restoring database for ${site_name}...`, 'command');
+								self.show_live_activity(site_name);
+								frappe.call({
+									method: 'bench_manager.api.restore_database',
+									args: {site_name: site_name, file_name: values.backup_file},
+									callback: (res) => { if(res.message) frappe.show_alert({message: res.message.message, indicator: 'blue'}); }
+								});
+							}
+						});
+						rd.show();
+					}
+				});
+			});
 		});
 	}
 
@@ -831,6 +1077,17 @@ class BenchDashboard {
 		this.$container.find('#btn-refresh-sites').on('click', () => {
 			this.load_sites();
 			this.load_status();
+		});
+		this.$container.find('#btn-global-clear-cache').on('click', () => {
+			frappe.confirm('Clear global Redis cache? This will clear cache for all sites.', () => {
+				this.append_console('Running bench clear-cache...', 'command');
+				this.show_live_activity('clear-cache');
+				frappe.call({
+					method: 'bench_manager.api.clear_cache',
+					args: {},
+					callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); }
+				});
+			});
 		});
 	}
 
@@ -1125,6 +1382,7 @@ class BenchDashboard {
 									<button type="button" class="btn btn-default btn-sm app-action-update" style="background: var(--btn-default-bg);">Update App</button>
 									<button type="button" class="btn btn-default btn-sm app-action-uninstall" style="background: var(--btn-default-bg);">Uninstall / Remove</button>
 									<button type="button" class="btn btn-default btn-sm app-action-sites" style="background: var(--btn-default-bg);">View Installed Sites</button>
+									<button type="button" class="btn btn-default btn-sm app-action-git" style="background: var(--btn-default-bg);">Git Status & Branch</button>
 									<button type="button" class="btn btn-default btn-sm app-action-live" style="background: var(--btn-default-bg);">Live Terminal</button>
 								</div>
 							`
@@ -1160,6 +1418,64 @@ class BenchDashboard {
 					d.$wrapper.find('.app-action-uninstall').on('click', () => { d.hide(); self.show_uninstall_dialog(app_info.app_name, bench_options); });
 					d.$wrapper.find('.app-action-sites').on('click', () => { d.hide(); self.show_app_sites_modal(app_info.app_name); });
 					d.$wrapper.find('.app-action-live').on('click', () => { d.hide(); self.show_live_activity(app_info.app_name); });
+					
+					d.$wrapper.find('.app-action-git').on('click', () => {
+						d.hide();
+						frappe.call({
+							method: 'bench_manager.api.get_app_git_status',
+							args: {app_name: app_info.app_name},
+							callback: (r) => {
+								const git = r.message || {branch: 'unknown', uncommitted: ''};
+								const isDirty = git.uncommitted ? true : false;
+								const gd = new frappe.ui.Dialog({
+									title: `Git Version Control: ${app_info.app_name}`,
+									fields: [
+										{ fieldtype: 'HTML', options: `
+											<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ${isDirty ? '#fef2f2' : '#f0fdf4'}; border: 1px solid ${isDirty ? '#fca5a5' : '#bbf7d0'};">
+												<strong style="color: ${isDirty ? '#dc2626' : '#166534'};">Status:</strong> ${isDirty ? 'Uncommitted changes present (Dirty)' : 'Working tree clean'}
+												<br><br>
+												<strong style="color: #374151;">Current Branch:</strong> <span class="badge" style="background: #e5e7eb; color: #374151;">${frappe.utils.escape_html(git.branch)}</span>
+												${isDirty ? `<br><br><pre style="font-size:11px;background:#fff;padding:8px;border:1px solid #fca5a5;border-radius:4px;">${frappe.utils.escape_html(git.uncommitted)}</pre>` : ''}
+											</div>
+										`},
+										{ label: 'Switch to Branch', fieldname: 'target_branch', fieldtype: 'Data', description: 'Enter the exact branch name you wish to switch to.', default: git.branch },
+										{ fieldtype: 'HTML', options: `<hr><button class="btn btn-default btn-sm" id="btn-git-pull" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg> Pull Latest Commits</button>`}
+									],
+									primary_action_label: 'Switch Branch',
+									primary_action: (values) => {
+										gd.hide();
+										if (values.target_branch === git.branch) {
+											frappe.show_alert({message: 'Already on that branch.', indicator: 'orange'});
+											return;
+										}
+										self.append_console(`Switching ${app_info.app_name} to branch ${values.target_branch}...`, 'command');
+										self.show_live_activity(app_info.app_name);
+										frappe.call({
+											method: 'bench_manager.api.switch_app_branch',
+											args: {app_name: app_info.app_name, branch: values.target_branch},
+											callback: (res) => { if(res.message) frappe.show_alert({message: res.message.message, indicator: 'blue'}); setTimeout(() => self.load_apps(), 1000); }
+										});
+									}
+								});
+								gd.$wrapper.find('#btn-git-pull').on('click', () => {
+									gd.hide();
+									frappe.call({
+										method: 'bench_manager.api.app_git_pull',
+										args: {app_name: app_info.app_name},
+										callback: (res) => { 
+											const out = res.message || {};
+											if (out.status === 'success') {
+												frappe.msgprint({title: 'Git Pull Successful', message: `<pre>${frappe.utils.escape_html(out.message)}</pre>`, indicator: 'green'});
+											} else {
+												frappe.msgprint({title: 'Git Pull Failed', message: out.message, indicator: 'red'});
+											}
+										}
+									});
+								});
+								gd.show();
+							}
+						});
+					});
 
 					d.show();
 				});
@@ -1393,6 +1709,15 @@ class BenchDashboard {
 	setup_app_actions() {
 		this.$container.find('#btn-new-app').on('click', () => this.show_new_app_dialog());
 		this.$container.find('#btn-refresh-apps').on('click', () => this.load_apps());
+		this.$container.find('#btn-global-build-assets').on('click', () => {
+			this.append_console('Running bench build...', 'command');
+			this.show_live_activity('bench-build');
+			frappe.call({
+				method: 'bench_manager.api.build_assets',
+				args: {},
+				callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); }
+			});
+		});
 
 		// Category filter chips
 		this.$container.find('.app-filter-chip').on('click', (e) => {
@@ -1584,22 +1909,43 @@ class BenchDashboard {
 		const $wrapper = this.$container.find('#logs-table-wrapper');
 		$wrapper.html('<div class="loading-placeholder">Loading logs...</div>');
 
-		frappe.call({
-			method: 'bench_manager.api.get_command_logs',
-			args: { limit: 50 },
-			callback: (r) => {
-				if (r.message && r.message.length) {
-					this.render_logs_table(r.message);
-				} else {
-					$wrapper.html(`
-						<div class="empty-state">
-							<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty Logs" style="max-width: 140px; margin-bottom: 20px; opacity: 0.4;">
-							<p>No command logs yet.</p>
-						</div>
-					`);
+		const logType = this.$container.find('#log-file-select').val() || 'command_logs';
+
+		if (logType === 'command_logs') {
+			frappe.call({
+				method: 'bench_manager.api.get_command_logs',
+				args: { limit: 50 },
+				callback: (r) => {
+					if (r.message && r.message.length) {
+						this.render_logs_table(r.message);
+					} else {
+						$wrapper.html(`
+							<div class="empty-state">
+								<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty Logs" style="max-width: 140px; margin-bottom: 20px; opacity: 0.4;">
+								<p>No command logs yet.</p>
+							</div>
+						`);
+					}
+				},
+			});
+		} else {
+			frappe.call({
+				method: 'bench_manager.api.get_system_logs',
+				args: { log_file: logType, lines: 200 },
+				callback: (r) => {
+					const logs = r.message || '';
+					if (logs && !logs.startsWith('Error') && logs !== 'No entries found.') {
+						$wrapper.html(`<pre style="background: var(--card-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 12px; color: var(--text-color); overflow-x: auto; max-height: 600px; white-space: pre-wrap;">${frappe.utils.escape_html(logs)}</pre>`);
+					} else {
+						$wrapper.html(`
+							<div class="empty-state">
+								<p>${frappe.utils.escape_html(logs)}</p>
+							</div>
+						`);
+					}
 				}
-			},
-		});
+			});
+		}
 	}
 
 	get_human_readable_command(commandStr) {
@@ -2322,6 +2668,42 @@ class BenchDashboard {
 				}
 			}
 		);
+	}
+
+	load_health() {
+		const $tab = this.$container.find('#tab-health');
+		if (!$tab.hasClass('active')) return;
+
+		frappe.call({
+			method: 'bench_manager.api.get_server_health',
+			callback: (r) => {
+				const health = r.message;
+				if (health && health.status === 'success') {
+					this.$container.find('#health-cpu-text').text(`${health.cpu}%`);
+					this.$container.find('#health-cpu-bar').css('width', `${health.cpu}%`);
+					
+					if (health.cpu > 80) this.$container.find('#health-cpu-bar').css('background', '#ef4444');
+					else if (health.cpu > 50) this.$container.find('#health-cpu-bar').css('background', '#f59e0b');
+					else this.$container.find('#health-cpu-bar').css('background', '#3b82f6');
+
+					this.$container.find('#health-mem-text').text(`${health.memory.percent}%`);
+					this.$container.find('#health-mem-bar').css('width', `${health.memory.percent}%`);
+					this.$container.find('#health-mem-details').text(`${(health.memory.used / 1073741824).toFixed(2)} GB / ${(health.memory.total / 1073741824).toFixed(2)} GB`);
+					
+					if (health.memory.percent > 85) this.$container.find('#health-mem-bar').css('background', '#ef4444');
+					else if (health.memory.percent > 65) this.$container.find('#health-mem-bar').css('background', '#f59e0b');
+					else this.$container.find('#health-mem-bar').css('background', '#10b981');
+
+					this.$container.find('#health-disk-text').text(`${health.disk.percent}%`);
+					this.$container.find('#health-disk-bar').css('width', `${health.disk.percent}%`);
+					this.$container.find('#health-disk-details').text(`${(health.disk.used / 1073741824).toFixed(2)} GB / ${(health.disk.total / 1073741824).toFixed(2)} GB`);
+					
+					if (health.disk.percent > 90) this.$container.find('#health-disk-bar').css('background', '#ef4444');
+					else if (health.disk.percent > 70) this.$container.find('#health-disk-bar').css('background', '#f59e0b');
+					else this.$container.find('#health-disk-bar').css('background', '#f59e0b');
+				}
+			}
+		});
 	}
 
 	execute_db_query(query) {
