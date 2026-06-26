@@ -1,60 +1,15 @@
 <div class="bench-dashboard">
 	<!-- Custom Sub-Header -->
-	<div class="bench-sub-header" style="display: flex; justify-content: space-between; align-items: flex-end; padding: 10px 0 20px 0; border-bottom: 1px solid var(--border-light); margin-bottom: 24px;">
-		<!-- Left: Context Selector & VS Code -->
-		<div style="display: flex; align-items: flex-end; gap: 12px;">
-			<div class="bench-context-selector" style="display: flex; flex-direction: column; gap: 6px;">
-				<label style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">Current Context</label>
-				<select id="bench-context-select" style="width: 220px; height: 36px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border-light); background: var(--card-bg); color: var(--text-color); outline: none; font-size: 13px; font-weight: 600; cursor: pointer;">
-					<option value="default">Loading...</option>
-				</select>
-			</div>
-			<button class="vscode-launch-btn" id="btn-launch-vscode" title="Open VS Code Editor" style="height: 36px; width: 36px;">
-				<svg width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-					<mask id="vsc-mask-1" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
-						<path d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4608 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4609 10.7808L75.8725 0.873756C73.7862 -0.130279 71.3446 0.115699 69.5135 1.44695L31.5418 33.4462L13.0853 19.5516C11.5478 18.3589 9.39544 18.4343 7.94345 19.7344L1.59371 25.5899C-0.138163 27.1527 -0.142613 29.8983 1.58412 31.4663L17.5753 45.8662L1.58412 60.2661C-0.142613 61.8341 -0.138163 64.5797 1.59371 66.1425L7.94345 71.998C9.39544 73.2981 11.5478 73.3735 13.0853 72.1808L31.5418 58.2862L69.5135 90.2854C69.9254 90.6397 70.3978 90.9235 70.9119 91.1154V99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
-					</mask>
-					<g mask="url(#vsc-mask-1)">
-						<path d="M96.4614 10.7962L75.8569 0.875542C73.4719 -0.272773 70.6217 0.211611 68.75 2.08333L1.29858 60.5765C-0.461825 62.1263 -0.421669 64.8866 1.38437 66.3893L7.81485 72.0865C9.28045 73.3626 11.4057 73.4104 12.9222 72.1979L91.1324 11.2015C93.9567 9.01654 98 11.0387 98 14.5789V14.4275C98 12.0243 96.6244 9.83383 94.4614 8.79288L96.4614 10.7962Z" fill="currentColor"/>
-						<g filter="url(#vsc-shadow-1)">
-							<path d="M96.4614 89.2038L75.8569 99.1245C73.4719 100.273 70.6217 99.7884 68.75 97.9167L1.29858 39.4235C-0.461825 37.8737 -0.421669 35.1134 1.38437 33.6107L7.81485 27.9135C9.28045 26.6374 11.4057 26.5896 12.9222 27.8021L91.1324 88.7985C93.9567 90.9835 98 88.9613 98 85.4211V85.5725C98 87.9757 96.6244 90.1662 94.4614 91.2071L96.4614 89.2038Z" fill="currentColor"/>
-						</g>
-						<g filter="url(#vsc-shadow2-1)">
-							<path d="M75.8578 99.1263C73.4721 100.274 70.6219 99.7885 68.75 97.9166C71.0564 100.223 75 98.5895 75 95.3278V4.67213C75 1.41039 71.0564 -0.223106 68.75 2.08329C70.6219 0.211402 73.4721 -0.273666 75.8578 0.87367L96.4587 10.7804C98.6234 11.8218 100 14.0114 100 16.4134V83.5866C100 85.9886 98.6234 88.1782 96.4587 89.2196L75.8578 99.1263Z" fill="currentColor"/>
-						</g>
-						<rect x="0" y="0" width="100" height="100" fill="url(#vsc-gradient-1)" opacity="0.25"/>
-					</g>
-					<defs>
-						<filter id="vsc-shadow-1"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
-						<filter id="vsc-shadow2-1"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/><feBlend mode="normal" in2="BackgroundImageFix"/><feComposite in="SourceGraphic"/></filter>
-						<linearGradient id="vsc-gradient-1" x1="50" y1="0" x2="50" y2="100" gradientUnits="userSpaceOnUse"><stop stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
-					</defs>
-				</svg>
-			</button>
-		</div>
-
-		<!-- Right: Illustration & Add Bench -->
+	<div class="bench-sub-header" style="display: flex; justify-content: flex-end; align-items: flex-end; padding: 10px 0 20px 0; border-bottom: 1px solid var(--border-light); margin-bottom: 24px;">
+		<!-- Right: Illustration -->
 		<div style="display: flex; align-items: flex-end; gap: 24px;">
 			<div class="header-illustration-wrapper" style="height: 80px; width: 160px; position: relative;">
 				<img id="header-ill-1" src="/assets/bench_manager/images/img2.png" style="position: absolute; height: 110px; bottom: -20px; right: 0; transition: all 0.8s; opacity: 1; z-index: 10; pointer-events: none;">
 				<img id="header-ill-2" src="/assets/bench_manager/images/img3.png" style="position: absolute; height: 110px; bottom: -20px; right: 0; transition: all 0.8s; opacity: 0; z-index: 10; pointer-events: none;">
 			</div>
-			<button class="btn btn-default btn-sm" id="btn-add-new-bench" style="height: 36px; padding: 0 16px; display: flex; align-items: center; gap: 6px; font-weight: 600; border-radius: 18px; background: var(--bg-light-gray); margin-bottom: 5px;">
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-				Add New Bench
-			</button>
 		</div>
 	</div>
 	<div class="bench-status-bar">
-		<div class="status-item">
-			<span class="status-icon benches-icon">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-			</span>
-			<div class="status-info">
-				<span class="status-label">Total Benches</span>
-				<span class="status-value" id="status-benches-count">—</span>
-			</div>
-		</div>
 		<div class="status-item">
 			<span class="status-icon sites-icon">
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -78,11 +33,7 @@
 	<!-- Tab Navigation -->
 	<div class="bench-main-layout">
 		<div class="bench-tabs">
-			<button class="bench-tab active" data-tab="benches">
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-				Benches
-			</button>
-			<button class="bench-tab" data-tab="sites">
+			<button class="bench-tab active" data-tab="sites">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
 				Sites
 			</button>
@@ -90,10 +41,7 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
 				Apps
 			</button>
-			<button class="bench-tab" data-tab="bench">
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-				Bench Info
-			</button>
+
 			<button class="bench-tab" data-tab="logs">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
 				Logs
@@ -113,22 +61,10 @@
 
 	<!-- Tab Content -->
 	<div class="bench-tab-content">
-		<!-- Benches Tab -->
-		<div class="tab-pane active" id="tab-benches">
-			<div class="tab-actions">
-				<h3 class="tab-actions-heading">Registered Benches</h3>
-				<button class="btn btn-primary btn-sm" id="btn-init-bench">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-					Initialize New Bench
-				</button>
-			</div>
-			<div class="bench-table-wrapper" id="benches-table-wrapper">
-				<div class="loading-placeholder">Loading benches...</div>
-			</div>
-		</div>
+
 
 		<!-- Sites Tab -->
-		<div class="tab-pane" id="tab-sites">
+		<div class="tab-pane active" id="tab-sites">
 			<div class="tab-actions">
 				<button class="btn btn-primary btn-sm" id="btn-new-site">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -180,39 +116,7 @@
 			</div>
 		</div>
 
-		<!-- Bench Info Tab -->
-		<div class="tab-pane" id="tab-bench">
-			<div class="bench-info-grid">
-				<div class="info-card" id="card-versions">
-					<div class="info-card-header">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-						<h3>Version Info</h3>
-					</div>
-					<div class="info-card-body" id="version-info">
-						<div class="loading-placeholder">Loading...</div>
-					</div>
-				</div>
-				<div class="info-card" id="card-actions">
-					<div class="info-card-header">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-						<h3>Quick Actions</h3>
-					</div>
-					<div class="info-card-body" style="display: flex; flex-direction: column; gap: 16px;">
-						<p style="font-size: 13px; margin: 0; color: var(--text-muted);">Execute standard maintenance tasks for the current bench, including pulling the latest updates and running database migrations.</p>
-						<div style="display: flex; gap: 12px;">
-							<button class="btn btn-primary btn-sm bench-action-btn" id="btn-bench-update" style="width: fit-content; padding-left: 20px; padding-right: 20px;">
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-								Update Bench
-							</button>
-							<button class="btn btn-default btn-sm bench-action-btn" id="btn-bench-migrate" style="width: fit-content; padding-left: 20px; padding-right: 20px;">
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-								Migrate All Sites
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
+
 
 		<!-- Logs Tab -->
 		<div class="tab-pane" id="tab-logs">
@@ -239,9 +143,7 @@
 					<p class="text-muted" style="font-size: 13px; margin: 0;">Manage your running code-server instances across benches.</p>
 				</div>
 				<div style="display: flex; gap: 12px; align-items: center;">
-					<select id="vscode-bench-select" class="form-control" style="width: 220px; font-size: 13px;">
-						<option value="">Select Bench...</option>
-					</select>
+
 					<button class="vscode-launch-btn" id="btn-launch-vscode-new" title="Start Editor" style="width: 34px; height: 34px;">
 						<svg width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
 							<mask id="vsc-mask-2" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
@@ -303,9 +205,7 @@
 				<div class="db-sidebar" id="db-sidebar" style="transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; flex-shrink: 0;">
 					<div class="db-sidebar-inner" style="width: 260px; display: flex; flex-direction: column; height: 100%;">
 						<div class="db-sidebar-header">
-							<select id="db-bench-select" class="form-control" style="font-size: 13px; margin-bottom: 10px; background-color: var(--control-bg);">
-								<option value="">Select Bench...</option>
-							</select>
+
 							<select id="db-site-select" class="form-control" style="font-size: 13px; margin-bottom: 10px; background-color: var(--control-bg);">
 								<option value="">Select Site...</option>
 							</select>

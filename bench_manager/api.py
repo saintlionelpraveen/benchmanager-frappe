@@ -401,255 +401,20 @@ def clear_current_site(site_name=None):
 # site_servers.json tracking file for isolated dev servers per site.
 
 
-def _get_site_servers_path_for_bench(bench_path):
-    """Get path to the site servers tracking file for a specific bench."""
-    return os.path.join(bench_path, _SITE_SERVERS_FILE)
 
 
-def _read_site_servers_for_bench(bench_path):
-    """Read the site servers tracking file for a specific bench.
-
-    Returns:
-        dict: Mapping of site_name -> {"pid": int, "port": int}
-    """
-    path = _get_site_servers_path_for_bench(bench_path)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
 
 
-def _write_site_servers_for_bench(bench_path, data):
-    """Write the site servers tracking file for a specific bench."""
-    path = _get_site_servers_path_for_bench(bench_path)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
 
 
-def _cleanup_dead_servers_for_bench(bench_path):
-    """Remove entries for servers whose processes are no longer running on a specific bench."""
-    servers = _read_site_servers_for_bench(bench_path)
-    cleaned = {}
-    for site, info in servers.items():
-        if _is_process_alive(info.get("pid", 0)):
-            cleaned[site] = info
-    if len(cleaned) != len(servers):
-        _write_site_servers_for_bench(bench_path, cleaned)
-    return cleaned
 
 
-@frappe.whitelist()
-def start_site_server_on_bench(bench_path, site_name):
-    """Start a dedicated dev server for a site on any bench.
-
-    Spawns a `bench serve --port <port>` process with FRAPPE_SITE env set.
-    The site gets its own isolated dev server on a unique port.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        site_name (str): Name of the site to start.
-
-    Returns:
-        dict: Status with port and PID info.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-    sites_path = os.path.join(bench_path, "sites")
-
-    if not os.path.isdir(os.path.join(sites_path, site_name)):
-        frappe.throw(f"Site '{site_name}' does not exist on {bench_name}")
-
-    # Check if already running
-    servers = _cleanup_dead_servers_for_bench(bench_path)
-    if site_name in servers:
-        return {
-            "status": "already_running",
-            "port": servers[site_name]["port"],
-            "message": f"Site '{site_name}' is already running on port {servers[site_name]['port']}."
-        }
-
-    # Find a free port
-    port = _find_free_port()
-
-    # Spawn the dev server subprocess
-    env = os.environ.copy()
-    env["FRAPPE_SITE"] = site_name
-    # Remove Werkzeug reloader env vars inherited from parent server
-    env.pop("WERKZEUG_SERVER_FD", None)
-    env.pop("WERKZEUG_RUN_MAIN", None)
-
-    log_dir = os.path.join(bench_path, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"site_server_{site_name}.log")
-
-    with open(log_file, "w") as lf:
-        proc = subprocess.Popen(
-            ["bench", "serve", "--port", str(port)],
-            cwd=bench_path,
-            env=env,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-        )
-
-    # Track the server
-    servers[site_name] = {"pid": proc.pid, "port": port}
-    _write_site_servers_for_bench(bench_path, servers)
-
-    return {
-        "status": "started",
-        "port": port,
-        "pid": proc.pid,
-        "message": f"Site '{site_name}' started on port {port} (on {bench_name})."
-    }
 
 
-@frappe.whitelist()
-def stop_site_server_on_bench(bench_path, site_name):
-    """Stop the dedicated dev server for a site on any bench.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        site_name (str): Name of the site to stop.
-
-    Returns:
-        dict: Status message.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-
-    servers = _read_site_servers_for_bench(bench_path)
-    if site_name not in servers:
-        return {"status": "not_running", "message": f"Site '{site_name}' is not running."}
-
-    pid = servers[site_name].get("pid")
-    if pid and _is_process_alive(pid):
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        except (OSError, ProcessLookupError):
-            pass
-        time.sleep(0.5)
-        if _is_process_alive(pid):
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
-
-    del servers[site_name]
-    _write_site_servers_for_bench(bench_path, servers)
-
-    return {"status": "stopped", "message": f"Site '{site_name}' stopped."}
 
 
-@frappe.whitelist()
-def check_site_active_on_bench(bench_path, site_name):
-    """Check if a site has an active isolated dev server on a specific bench.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        site_name (str): Name of the site to check.
-
-    Returns:
-        dict: {"active": bool, "is_default": bool, "port": int|None}
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-
-    # Check if this is the default site
-    is_default = False
-    csc_path = os.path.join(bench_path, "sites", "common_site_config.json")
-    try:
-        with open(csc_path, "r") as f:
-            config = json.load(f)
-            is_default = config.get("default_site") == site_name
-    except Exception:
-        pass
-
-    # Check if a dev server is running for this site
-    servers = _cleanup_dead_servers_for_bench(bench_path)
-    if site_name in servers:
-        return {"active": True, "is_default": is_default, "port": servers[site_name]["port"]}
-
-    return {"active": False, "is_default": is_default, "port": None}
 
 
-@frappe.whitelist()
-def get_site_open_url_on_bench(bench_path, site_name):
-    """Get the URL to open a specific site on any bench.
-
-    If the site has an isolated dev server running, returns its direct URL.
-    Otherwise, returns the bench's main webserver URL with hostname routing.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        site_name (str): Name of the site.
-
-    Returns:
-        dict: URL information and running status.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-    sites_path = os.path.join(bench_path, "sites")
-
-    if not os.path.isdir(os.path.join(sites_path, site_name)):
-        frappe.throw(f"Site '{site_name}' does not exist on {bench_name}")
-
-    # Check if a dedicated dev server is running for this site
-    servers = _cleanup_dead_servers_for_bench(bench_path)
-    if site_name in servers:
-        port = servers[site_name]["port"]
-        return {
-            "url": f"http://127.0.0.1:{port}",
-            "is_running": True,
-            "has_dedicated_server": True,
-            "port": port,
-        }
-
-    # Fallback: check if the bench itself is running, then use hostname routing
-    csc_path = os.path.join(sites_path, "common_site_config.json")
-    bench_port = 8000
-    try:
-        with open(csc_path) as f:
-            config = json.load(f)
-            bench_port = config.get("webserver_port", 8000)
-    except Exception:
-        pass
-
-    # Check if the bench is online
-    bench_online = False
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('127.0.0.1', int(bench_port))) == 0:
-                bench_online = True
-    except Exception:
-        pass
-
-    if bench_online:
-        hostname = f"{site_name}.localhost" if not site_name.endswith(".localhost") else site_name
-        return {
-            "url": f"http://{hostname}:{bench_port}",
-            "is_running": True,
-            "has_dedicated_server": False,
-            "port": bench_port,
-            "message": "Using bench main server with hostname routing.",
-        }
-
-    return {
-        "url": None,
-        "is_running": False,
-        "has_dedicated_server": False,
-        "message": "Site is not running. Start the site or the bench first.",
-    }
 
 
 @frappe.whitelist()
@@ -1161,11 +926,32 @@ def update_bench():
     return {"status": "started", "message": "Bench update has started."}
 
 
+@frappe.whitelist()
+def update_bench_app(app_name):
+    """Run bench update --app to update a specific app."""
+    frappe.only_for("System Manager")
+    app_name = sanitize_input(app_name, "App Name")
+
+    import threading
+    from bench_manager.utils import run_bench_command as _run_bench_command
+    thread = threading.Thread(
+        target=_run_bench_command,
+        kwargs={
+            "command_parts": ["update", "--apps", app_name, "--no-backup"],
+            "user": frappe.session.user,
+            "site": frappe.local.site
+        }
+    )
+    thread.daemon = True
+    thread.start()
+
+    return {"status": "started", "message": f"App update for '{app_name}' has started."}
 # ─── Bench Management ───────────────────────────────────────────────
 
 
 @frappe.whitelist()
-def get_bench_status(bench_path=None):
+def get_bench_status():
+    bench_path = get_bench_path()
     """Get comprehensive bench status information.
 
     Args:
@@ -1177,7 +963,7 @@ def get_bench_status(bench_path=None):
     frappe.only_for("System Manager")
 
     if bench_path:
-        bench_path = _validate_bench_path(bench_path)
+        bench_path = get_bench_path()
         # List sites and apps from the remote bench directory
         sites_dir = os.path.join(bench_path, "sites")
         apps_dir = os.path.join(bench_path, "apps")
@@ -1232,7 +1018,8 @@ def get_bench_status(bench_path=None):
 
 
 @frappe.whitelist()
-def get_bench_version(bench_path=None):
+def get_bench_version():
+    bench_path = get_bench_path()
     """Get bench, frappe, and Python version information.
 
     Args:
@@ -1245,7 +1032,7 @@ def get_bench_version(bench_path=None):
 
     import subprocess
 
-    bp = _validate_bench_path(bench_path) if bench_path else get_bench_path()
+    bp = get_bench_path() if bench_path else get_bench_path()
     versions = {}
 
     # Bench version
@@ -1350,7 +1137,8 @@ def bench_migrate_all():
 
 
 @frappe.whitelist()
-def get_site_apps(site_name, bench_path=None):
+def get_site_apps(site_name):
+    bench_path = get_bench_path()
     """Get installed apps for a specific site using bench CLI.
 
     This is more reliable than the file-based approach because it
@@ -1369,7 +1157,7 @@ def get_site_apps(site_name, bench_path=None):
 
     site_name = sanitize_input(site_name, "Site Name")
     if bench_path:
-        bench_path = _validate_bench_path(bench_path)
+        bench_path = get_bench_path()
     else:
         bench_path = get_bench_path()
 
@@ -1415,7 +1203,8 @@ def get_site_apps(site_name, bench_path=None):
 
 
 @frappe.whitelist()
-def get_app_sites(app_name, bench_path=None):
+def get_app_sites(app_name):
+    bench_path = get_bench_path()
     """Get all sites where a specific app is installed.
 
     Args:
@@ -1429,7 +1218,7 @@ def get_app_sites(app_name, bench_path=None):
     
     app_name = sanitize_input(app_name, "App Name")
     if bench_path:
-        bench_path = _validate_bench_path(bench_path)
+        bench_path = get_bench_path()
     else:
         bench_path = get_bench_path()
         
@@ -1483,566 +1272,28 @@ def get_app_sites(app_name, bench_path=None):
 # ─── Multi-Bench Management ─────────────────────────────────────────
 
 
-@frappe.whitelist()
-def discover_benches():
-    """Discover all bench installations in the parent directory of the current bench.
-
-    Scans the parent directory (e.g., /home/praveen/) for directories
-    that look like valid Frappe bench installations (contain 'apps' and 'sites').
-
-    Returns:
-        list: List of discovered bench dicts with name, path, version, status, is_host.
-    """
-    frappe.only_for("System Manager")
-
-    from bench_manager.utils import validate_bench_path
-
-    bench_path = get_bench_path()
-    parent_dir = os.path.dirname(bench_path)
-    benches = []
-
-    try:
-        for item in sorted(os.listdir(parent_dir)):
-            candidate = os.path.join(parent_dir, item)
-            if not os.path.isdir(candidate):
-                continue
-            if not validate_bench_path(candidate):
-                continue
-
-            is_host = os.path.abspath(candidate) == os.path.abspath(bench_path)
-
-            # Read Frappe version from the installed frappe package
-            frappe_version = "Unknown"
-            try:
-                version_file = os.path.join(candidate, "apps", "frappe", "frappe", "__init__.py")
-                if os.path.exists(version_file):
-                    with open(version_file, "r") as f:
-                        content = f.read()
-                        import re as _re
-                        match = _re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
-                        if match:
-                            frappe_version = match.group(1)
-            except Exception:
-                pass
-
-            # Determine status: check if the bench has a running process on its webserver_port
-            status = "Offline"
-            if is_host:
-                status = "Online"
-            else:
-                try:
-                    csc = os.path.join(candidate, "sites", "common_site_config.json")
-                    port = 8000
-                    if os.path.exists(csc):
-                        import json as _json
-                        with open(csc) as f:
-                            cfg = _json.load(f)
-                            port = cfg.get("webserver_port", 8000)
-                    import socket
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        if s.connect_ex(('127.0.0.1', int(port))) == 0:
-                            status = "Online"
-                except Exception:
-                    pass
-
-            # Count sites and apps
-            sites_count = 0
-            apps_count = 0
-            try:
-                sites_dir = os.path.join(candidate, "sites")
-                for s in os.listdir(sites_dir):
-                    sp = os.path.join(sites_dir, s)
-                    if os.path.isdir(sp) and os.path.exists(os.path.join(sp, "site_config.json")):
-                        sites_count += 1
-                apps_dir = os.path.join(candidate, "apps")
-                for a in os.listdir(apps_dir):
-                    if os.path.isdir(os.path.join(apps_dir, a)) and not a.startswith("."):
-                        apps_count += 1
-            except Exception:
-                pass
-
-            benches.append({
-                "name": item,
-                "path": candidate,
-                "version": f"v{frappe_version}" if frappe_version != "Unknown" else "—",
-                "status": status,
-                "is_host": is_host,
-                "sites_count": sites_count,
-                "apps_count": apps_count,
-            })
-    except Exception as e:
-        frappe.logger("bench_manager").error(f"Error discovering benches: {e}")
-
-    return benches
 
 
-@frappe.whitelist()
-def init_bench(bench_name, frappe_branch="version-15", site_name="", admin_password="admin", mariadb_root_password=""):
-    """Initialize a new Frappe bench, optionally creating a site after.
-
-    Args:
-        bench_name (str): Name of the new bench folder.
-        frappe_branch (str): Frappe branch to use.
-        site_name (str): Optional site to create after init.
-        admin_password (str): Admin password for the site.
-        mariadb_root_password (str): MariaDB root password.
-
-    Returns:
-        dict: Command execution result.
-    """
-    frappe.only_for("System Manager")
-
-    bench_name = sanitize_input(bench_name, "Bench Name")
-    frappe_branch = sanitize_input(frappe_branch, "Frappe Branch")
-
-    # Validate branch
-    allowed_branches = ["version-15", "version-16"]
-    if frappe_branch not in allowed_branches:
-        frappe.throw(f"Invalid branch. Allowed: {', '.join(allowed_branches)}")
-
-    bench_path = get_bench_path()
-    parent_dir = os.path.dirname(bench_path)
-    new_bench_path = os.path.join(parent_dir, bench_name)
-
-    if os.path.exists(new_bench_path):
-        frappe.throw(f"Directory '{bench_name}' already exists at {parent_dir}")
-
-    # Detect python executable
-    import sys
-    import shutil
-    python_exec = sys.executable  # e.g., /usr/bin/python3
-
-    if frappe_branch == "version-16":
-        if shutil.which("python3.12"):
-            python_exec = shutil.which("python3.12")
-        else:
-            frappe.throw("Frappe version-16 strictly requires Python 3.12 or higher. Your system does not have Python 3.12 installed. Please use version-15 instead.")
-
-    # Build the bench init command
-    # Note: we run `bench init` directly, not through run_bench_command
-    # because `bench init` operates on a NEW directory, not inside an existing bench
-    import threading
-
-    def _run_init():
-        import pty
-        import select
-        import errno
-
-        try:
-            has_context = bool(getattr(frappe.local, "conf", None))
-        except Exception:
-            has_context = False
-            frappe.local.flags = frappe._dict()
-
-        current_site = frappe.local.site if hasattr(frappe.local, "site") else None
-        if not has_context and current_site:
-            try:
-                frappe.init(current_site)
-                frappe.connect()
-                frappe.set_user(frappe.session.user if frappe.has_active_session() else "Administrator")
-            except Exception:
-                pass
-
-        def _publish(msg, msg_type="stdout"):
-            try:
-                push_sse_event(msg, msg_type)
-            except Exception:
-                pass
-            try:
-                frappe.publish_realtime(
-                    "bench_console",
-                    {"message": msg, "msg_type": msg_type},
-                    room="all",
-                    after_commit=False,
-                )
-            except Exception:
-                try:
-                    import json as _json
-                    r = frappe.cache()
-                    r.publish(
-                        "events",
-                        _json.dumps({
-                            "event": "bench_console",
-                            "message": {"message": msg, "msg_type": msg_type},
-                            "room": "all",
-                            "namespace": getattr(frappe.local, "site", None)
-                        }),
-                    )
-                except Exception:
-                    pass
-
-        bench_exec = shutil.which("bench") or "bench"
-        cmd = [bench_exec, "init", new_bench_path, "--frappe-branch", frappe_branch, "--python", python_exec]
-        command_str = f"bench init {bench_name} --frappe-branch {frappe_branch} --python {python_exec}"
-
-        _publish(f"$ {command_str}", "command")
-        _publish(f"Initializing new bench at {new_bench_path}...", "info")
-        _publish(f"Frappe branch: {frappe_branch} | Python: {python_exec}", "info")
-
-        try:
-            env = {
-                **os.environ,
-                "PYTHONUNBUFFERED": "1",
-                "TERM": "xterm-256color",
-                "COLUMNS": "120",
-            }
-
-            ansi_re = __import__("re").compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B")
-            master_fd, slave_fd = pty.openpty()
-
-            process = subprocess.Popen(
-                cmd,
-                cwd=parent_dir,
-                stdin=subprocess.DEVNULL,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                close_fds=True,
-                env=env,
-            )
-
-            os.close(slave_fd)
-
-            output_lines = []
-            buffer = ""
-
-            while True:
-                try:
-                    ready, _, _ = select.select([master_fd], [], [], 1.0)
-                except (ValueError, OSError):
-                    break
-
-                if not ready:
-                    if process.poll() is not None:
-                        break
-                    continue
-
-                try:
-                    data = os.read(master_fd, 4096)
-                except OSError as e:
-                    if e.errno == errno.EIO:
-                        break
-                    raise
-
-                if not data:
-                    break
-
-                text = data.decode("utf-8", errors="replace")
-                text = ansi_re.sub("", text)
-
-                for char in text:
-                    if char in ("\n", "\r"):
-                        clean_msg = buffer.strip()
-                        if clean_msg:
-                            output_lines.append(clean_msg)
-                            _publish(clean_msg)
-                        buffer = ""
-                    else:
-                        buffer += char
-
-            if buffer.strip():
-                output_lines.append(buffer.strip())
-                _publish(buffer.strip())
-
-            try:
-                os.close(master_fd)
-            except OSError:
-                pass
-            process.wait(timeout=1200)  # 20 min timeout for bench init
-
-            status = "Success" if process.returncode == 0 else "Failed"
-            from bench_manager.utils import log_command
-            log_command(command_str, "\n".join(output_lines), "", status, "Administrator")
-
-            if status == "Success":
-                _publish(f"✓ Bench '{bench_name}' initialized successfully at {new_bench_path}", "success")
-                # Chain site creation if requested
-                if site_name and "." in site_name:
-                    _publish(f"\nNow creating site '{site_name}' on the new bench...", "info")
-                    try:
-                        site_cmd = [bench_exec, "new-site", site_name, "--admin-password", admin_password]
-                        if mariadb_root_password:
-                            site_cmd.extend(["--mariadb-root-password", mariadb_root_password])
-                        sr = subprocess.run(site_cmd, cwd=new_bench_path, capture_output=True, text=True, timeout=300, env=env)
-                        for line in sr.stdout.strip().split("\n"):
-                            if line.strip():
-                                _publish(line.strip())
-                        if sr.returncode == 0:
-                            _publish(f"✓ Site '{site_name}' created successfully!", "success")
-                            # Set as default site
-                            subprocess.run([bench_exec, "use", site_name], cwd=new_bench_path, capture_output=True, timeout=30)
-                        else:
-                            _publish(f"✕ Site creation failed: {sr.stderr[:300]}", "error")
-                    except Exception as se:
-                        _publish(f"Site creation error: {str(se)}", "error")
-            else:
-                _publish(f"✕ Bench initialization failed with exit code {process.returncode}", "error")
-                _publish("Cleaning up incomplete bench directory...", "info")
-                try:
-                    if os.path.exists(new_bench_path):
-                        shutil.rmtree(new_bench_path)
-                        _publish("Cleanup complete. You can try again.", "info")
-                except Exception as ce:
-                    _publish(f"Cleanup failed: {str(ce)}", "error")
-
-        except Exception as e:
-            _publish(f"Error: {str(e)}", "error")
-            from bench_manager.utils import log_command
-            log_command(command_str, "", str(e), "Failed", "Administrator")
-
-    thread = threading.Thread(target=_run_init)
-    thread.daemon = True
-    thread.start()
-
-    msg = f"Bench initialization for '{bench_name}' has started. This may take 5-10 minutes."
-    if site_name:
-        msg += f" Site '{site_name}' will be created after."
-
-    return {
-        "status": "started",
-        "message": msg,
-        "path": new_bench_path,
-    }
 
 
 # ─── Bench Operations (P0–P3) ───────────────────────────────────────
 
 
-def _validate_bench_path(bench_path):
-    """Validate that bench_path is a real bench and within the allowed parent dir."""
-    from bench_manager.utils import validate_bench_path as _vbp
-    if not bench_path or not _vbp(bench_path):
-        frappe.throw("Invalid bench path")
-    host = get_bench_path()
-    parent = os.path.dirname(host)
-    if not os.path.abspath(bench_path).startswith(os.path.abspath(parent)):
-        frappe.throw("Bench path outside allowed directory")
-    return os.path.abspath(bench_path)
+
+
+
+
+
+
+
+
 
 
 @frappe.whitelist()
-def get_bench_details(bench_path):
-    """Get sites, apps, and config for any bench on the server."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    sites, apps = [], []
-    # Sites
-    sites_dir = os.path.join(bench_path, "sites")
-    for item in sorted(os.listdir(sites_dir)):
-        sc = os.path.join(sites_dir, item, "site_config.json")
-        if os.path.isdir(os.path.join(sites_dir, item)) and os.path.exists(sc):
-            try:
-                with open(sc) as f:
-                    cfg = json.load(f)
-                sites.append({"name": item, "db": cfg.get("db_name", ""), "maintenance": bool(cfg.get("maintenance_mode", 0))})
-            except Exception:
-                sites.append({"name": item, "db": "", "maintenance": False})
-    # Apps
-    apps_dir = os.path.join(bench_path, "apps")
-    for item in sorted(os.listdir(apps_dir)):
-        if os.path.isdir(os.path.join(apps_dir, item)) and not item.startswith("."):
-            apps.append(item)
-    return {"sites": sites, "apps": apps, "path": bench_path}
-
-
-@frappe.whitelist()
-def start_bench(bench_path, port=8000):
-    """Start a bench in background with proper daemonization."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    port = int(port)
-    bench_name = os.path.basename(bench_path)
-    # Check if already running
-    try:
-        import socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('127.0.0.1', port)) == 0:
-                return {"status": "already_running", "message": f"{bench_name} is already running on port {port}."}
-    except Exception:
-        pass
-    
-    # Check if Procfile exists
-    if not os.path.exists(os.path.join(bench_path, "Procfile")):
-        return {"status": "error", "message": f"Procfile not found. '{bench_name}' might be broken or incomplete."}
-    # Set ports in common_site_config.json so bench start uses them
-    csc_path = os.path.join(bench_path, "sites", "common_site_config.json")
-    try:
-        with open(csc_path) as f:
-            config = json.load(f)
-            
-        def get_free_port(start_port):
-            import socket
-            p = int(start_port)
-            while True:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    if s.connect_ex(('127.0.0.1', p)) != 0:
-                        return p
-                p += 1
-
-        config["webserver_port"] = get_free_port(port)
-        
-        if "socketio_port" in config:
-            config["socketio_port"] = get_free_port(config["socketio_port"])
-            
-        if "file_watcher_port" in config:
-            config["file_watcher_port"] = get_free_port(config["file_watcher_port"])
-            
-        if "redis_cache" in config:
-            current_port = int(config["redis_cache"].split(":")[-1])
-            new_port = get_free_port(current_port)
-            config["redis_cache"] = f"redis://127.0.0.1:{new_port}"
-            config["redis_socketio"] = f"redis://127.0.0.1:{new_port}"
-            
-        if "redis_queue" in config:
-            current_port = int(config["redis_queue"].split(":")[-1])
-            new_port = get_free_port(current_port)
-            config["redis_queue"] = f"redis://127.0.0.1:{new_port}"
-
-        with open(csc_path, "w") as f:
-            json.dump(config, f, indent=2)
-            
-        # Remove existing Procfile to bypass the interactive overwrite prompt
-        procfile_path = os.path.join(bench_path, "Procfile")
-        if os.path.exists(procfile_path):
-            os.remove(procfile_path)
-            
-        bench_exec = shutil.which("bench") or "bench"
-        # Regenerate configs so Procfile and redis confs use the new free ports
-        subprocess.run([bench_exec, "setup", "redis"], cwd=bench_path, check=False)
-        subprocess.run([bench_exec, "setup", "socketio"], cwd=bench_path, check=False)
-        subprocess.run([bench_exec, "setup", "procfile"], cwd=bench_path, check=False)
-    except Exception:
-        pass
-    # Start bench with proper process group detachment
-    log_file = os.path.join(bench_path, "logs", "bench_start.log")
-    os.makedirs(os.path.join(bench_path, "logs"), exist_ok=True)
-    
-    # Use full path to bench if possible
-    bench_exec = shutil.which("bench") or "bench"
-    
-    # Build a clean env: remove werkzeug FD/reloader vars to prevent the child
-    # bench's werkzeug from inheriting a stale socket FD from the host bench.
-    # WERKZEUG_SERVER_FD: host bench's socket FD — invalid in the child process.
-    # WERKZEUG_RUN_MAIN: prevents werkzeug from thinking it's a reloader child.
-    start_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    start_env.pop("WERKZEUG_SERVER_FD", None)
-    start_env.pop("WERKZEUG_RUN_MAIN", None)
-    
-    # Open the log file *without* a with-block. The FD must stay open for the
-    # lifetime of the detached child process tree (honcho → redis/web/worker).
-    # Closing it prematurely (as `with` would) invalidates stdout for all
-    # children and causes "Bad file descriptor" crashes.
-    lf = open(log_file, "a")
-    lf.write(f"\n--- Starting bench at {time.ctime()} on port {port} ---\n")
-    lf.flush()
-    proc = subprocess.Popen(
-        [bench_exec, "start"],
-        cwd=bench_path,
-        stdout=lf,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        close_fds=False,          # let child inherit the log FD
-        start_new_session=True,
-        env=start_env,
-    )
-    # Detach the log FD from this process — the OS keeps it open for the child
-    # via the dup'd descriptor in the Popen internals.
-    lf.close()
-    # Check if process failed immediately
-    time.sleep(3.0)  # Wait longer to ensure everything (Redis, Web, etc.) started
-    if proc.poll() is not None:
-        error_detail = ""
-        try:
-            if os.path.exists(log_file):
-                with open(log_file) as f:
-                    log_content = f.read()
-                    if log_content:
-                        # Get the last 10 lines for better context
-                        lines = log_content.strip().split("\n")
-                        error_detail = "\n".join(lines[-10:])
-        except Exception:
-            pass
-        
-        return {
-            "status": "error",
-            "message": f"{bench_name} failed to start (exit code {proc.returncode}).",
-            "detail": error_detail
-        }
-    return {"status": "started", "message": f"{bench_name} starting on port {port}...", "port": port}
-
-
-@frappe.whitelist()
-def stop_bench(bench_path):
-    """Stop a running bench by killing its honcho process tree and cleaning up ports."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    bench_name = os.path.basename(bench_path)
-    
-    # Get ports to clean up later if needed
-    ports = []
-    csc_path = os.path.join(bench_path, "sites", "common_site_config.json")
-    if os.path.exists(csc_path):
-        try:
-            with open(csc_path) as f:
-                cfg = json.load(f)
-                ports.append(cfg.get("webserver_port", 8000))
-                # Add Redis ports from config strings like "redis://127.0.0.1:13000"
-                for key in ["redis_cache", "redis_queue", "redis_socketio"]:
-                    val = cfg.get(key)
-                    if val and ":" in val:
-                        try:
-                            ports.append(int(val.split(":")[-1]))
-                        except: pass
-        except: pass
-
-    try:
-        # 1. Kill Honcho
-        r = subprocess.run(["pgrep", "-f", f"honcho.*{bench_name}"], capture_output=True, text=True, timeout=5)
-        if r.returncode == 0 and r.stdout.strip():
-            pids = r.stdout.strip().split("\n")
-            for pid in pids:
-                subprocess.run(["kill", "-TERM", pid.strip()], timeout=5)
-        
-        # 2. Wait and check ports, kill anything still lingering
-        time.sleep(1.0)
-        
-        for port in set(ports):
-            try:
-                # Use fuser to kill anything on these ports
-                subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True, timeout=5)
-            except:
-                pass
-
-        return {"status": "stopped", "message": f"{bench_name} stopped and ports cleared."}
-    except Exception as e:
-        frappe.throw(f"Failed to stop bench: {e}")
-
-
-@frappe.whitelist()
-def delete_bench(bench_path, confirm="no"):
-    """Delete a bench directory entirely."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    host = get_bench_path()
-    if os.path.abspath(bench_path) == os.path.abspath(host):
-        frappe.throw("Cannot delete the host bench (the one running this app).")
-    if confirm != "yes":
-        frappe.throw("Must confirm deletion with confirm='yes'")
-    bench_name = os.path.basename(bench_path)
-    # Stop first
-    try:
-        stop_bench(bench_path)
-    except Exception:
-        pass
-    import shutil as _shutil
-    _shutil.rmtree(bench_path, ignore_errors=True)
-    return {"status": "deleted", "message": f"Bench '{bench_name}' deleted."}
-
-
-@frappe.whitelist()
-def backup_all_bench_sites(bench_path):
+def backup_all_bench_sites():
     """Backup all sites on a given bench."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     bench_name = os.path.basename(bench_path)
     bench_exec = shutil.which("bench") or "bench"
     # Discover sites
@@ -2095,55 +1346,13 @@ def backup_all_bench_sites(bench_path):
     return {"status": "started", "message": f"Backup of {len(sites)} sites on {bench_name} started."}
 
 
-@frappe.whitelist()
-def update_remote_bench(bench_path):
-    """Run bench update on a remote bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    bench_name = os.path.basename(bench_path)
-    import threading
-    def _run():
-        from bench_manager.utils import log_command
-        try:
-            frappe.init(frappe.local.site)
-            frappe.connect()
-        except Exception:
-            pass
-        def _pub(msg, t="stdout"):
-            try:
-                push_sse_event(msg, t)
-            except Exception:
-                pass
-            try:
-                frappe.publish_realtime("bench_console", {"message": msg, "msg_type": t}, room="all", after_commit=False)
-            except Exception:
-                pass
-        bench_exec = shutil.which("bench") or "bench"
-        cmd = [bench_exec, "update", "--no-backup"]
-        _pub(f"$ bench update --no-backup  (in {bench_name})", "command")
-        try:
-            r = subprocess.run(cmd, cwd=bench_path, capture_output=True, text=True, timeout=600)
-            for line in r.stdout.strip().split("\n"):
-                if line.strip():
-                    _pub(line.strip())
-            if r.returncode == 0:
-                _pub(f"Bench update completed for {bench_name}.", "success")
-            else:
-                _pub(f"Bench update failed for {bench_name}.", "error")
-            log_command(f"bench update ({bench_name})", r.stdout[:5000], r.stderr[:2000], "Success" if r.returncode == 0 else "Failed", "Administrator")
-        except Exception as e:
-            _pub(f"Error: {str(e)}", "error")
-    t = threading.Thread(target=_run)
-    t.daemon = True
-    t.start()
-    return {"status": "started", "message": f"Bench update started for {bench_name}."}
 
 
 @frappe.whitelist()
-def bench_health_check(bench_path):
+def bench_health_check():
     """Get health info: disk usage, venv status, last update."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     info = {"path": bench_path, "name": os.path.basename(bench_path)}
     # Disk usage
     try:
@@ -2180,61 +1389,15 @@ def bench_health_check(bench_path):
     return info
 
 
-@frappe.whitelist()
-def sync_app_to_bench(app_name, target_bench_path):
-    """Install an app from the host bench onto another bench using local path."""
-    frappe.only_for("System Manager")
-    target_bench_path = _validate_bench_path(target_bench_path)
-    app_name = sanitize_input(app_name, "App Name")
-    host = get_bench_path()
-    app_source = os.path.join(host, "apps", app_name)
-    if not os.path.isdir(app_source):
-        frappe.throw(f"App '{app_name}' not found in host bench.")
-    bench_exec = shutil.which("bench") or "bench"
-    target_name = os.path.basename(target_bench_path)
-    import threading
-    def _run():
-        from bench_manager.utils import log_command
-        try:
-            frappe.init(frappe.local.site)
-            frappe.connect()
-        except Exception:
-            pass
-        def _pub(msg, t="stdout"):
-            try:
-                push_sse_event(msg, t)
-            except Exception:
-                pass
-            try:
-                frappe.publish_realtime("bench_console", {"message": msg, "msg_type": t}, room="all", after_commit=False)
-            except Exception:
-                pass
-        _pub(f"$ bench get-app {app_source}  (target: {target_name})", "command")
-        try:
-            r = subprocess.run([bench_exec, "get-app", app_source], cwd=target_bench_path, capture_output=True, text=True, timeout=600)
-            for line in r.stdout.strip().split("\n"):
-                if line.strip():
-                    _pub(line.strip())
-            if r.returncode == 0:
-                _pub(f"App '{app_name}' synced to {target_name}.", "success")
-            else:
-                _pub(f"Failed to sync app: {r.stderr[:300]}", "error")
-            log_command(f"sync-app {app_name} -> {target_name}", r.stdout[:5000], r.stderr[:2000], "Success" if r.returncode == 0 else "Failed", "Administrator")
-        except Exception as e:
-            _pub(f"Error: {str(e)}", "error")
-    t = threading.Thread(target=_run)
-    t.daemon = True
-    t.start()
-    return {"status": "started", "message": f"Syncing '{app_name}' to {target_name}..."}
 
 
 
 
 @frappe.whitelist()
-def get_bench_port(bench_path):
+def get_bench_port():
     """Get the configured webserver port for a bench."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     csc_path = os.path.join(bench_path, "sites", "common_site_config.json")
     port = 8000
     try:
@@ -2246,216 +1409,21 @@ def get_bench_port(bench_path):
     return {"port": port}
 
 
-@frappe.whitelist()
-def set_default_site_on_bench(bench_path, site_name):
-    """Set a site as the default on a bench.
-
-    Writes both currentsite.txt and default_site in common_site_config.json
-    so that Frappe serves this site regardless of the hostname in the request.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-    # Verify site exists
-    site_dir = os.path.join(bench_path, "sites", site_name)
-    if not os.path.isdir(site_dir):
-        frappe.throw(f"Site '{site_name}' does not exist on {bench_name}")
-
-    sites_path = os.path.join(bench_path, "sites")
-    errors = []
-
-    # 1. Write currentsite.txt
-    try:
-        with open(os.path.join(sites_path, "currentsite.txt"), "w") as f:
-            f.write(site_name)
-    except Exception as e:
-        errors.append(f"currentsite.txt: {e}")
-
-    # 2. Update default_site and hostname mappings in common_site_config.json
-    csc_path = os.path.join(sites_path, "common_site_config.json")
-    try:
-        with open(csc_path) as f:
-            config = json.load(f)
-
-        config["default_site"] = site_name
-
-        # Build hostname mappings for multi-tenancy:
-        # Each site gets a {name}.localhost entry so Frappe routes by Host header.
-        # Do NOT map localhost/127.0.0.1 — that would hijack all traffic
-        # and break the bench manager site.
-        domains = config.get("domains", {})
-        site_map = config.get("sites", {})
-
-        # Add mapping for the target site
-        _ensure_site_hostname_mapping(site_name, domains, site_map)
-
-        # Also ensure mappings exist for ALL other sites so multi-tenancy works
-        for entry in os.listdir(sites_path):
-            entry_path = os.path.join(sites_path, entry)
-            if os.path.isdir(entry_path) and entry not in (
-                "assets", "__pycache__", ".cache"
-            ):
-                _ensure_site_hostname_mapping(entry, domains, site_map)
-
-        config["domains"] = domains
-        config["sites"] = site_map
-
-        with open(csc_path, "w") as f:
-            json.dump(config, f, indent=1)
-    except Exception as e:
-        errors.append(f"common_site_config.json: {e}")
-
-    if errors:
-        return {"status": "error", "message": "Failed: " + "; ".join(errors)}
-
-    # Determine the URL for opening the site
-    port = 8000
-    try:
-        with open(csc_path) as f:
-            cfg = json.load(f)
-            port = cfg.get("webserver_port", 8000)
-    except Exception:
-        pass
-
-    hostname = f"{site_name}.localhost" if not site_name.endswith(".localhost") else site_name
-
-    return {
-        "status": "success",
-        "message": f"'{site_name}' set as default on {bench_name}.",
-        "open_url": f"http://{hostname}:{port}",
-    }
 
 
-@frappe.whitelist()
-def clear_default_site_on_bench(bench_path):
-    """Clear the default site on a bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    bench_name = os.path.basename(bench_path)
-    sites_path = os.path.join(bench_path, "sites")
-    errors = []
-
-    # 1. Clear currentsite.txt
-    try:
-        currentsite_path = os.path.join(sites_path, "currentsite.txt")
-        if os.path.exists(currentsite_path):
-            os.remove(currentsite_path)
-    except Exception as e:
-        errors.append(f"currentsite.txt: {e}")
-
-    # 2. Update default_site in common_site_config.json
-    csc_path = os.path.join(sites_path, "common_site_config.json")
-    try:
-        if os.path.exists(csc_path):
-            with open(csc_path) as f:
-                config = json.load(f)
-
-            if "default_site" in config:
-                del config["default_site"]
-
-            with open(csc_path, "w") as f:
-                json.dump(config, f, indent=1)
-    except Exception as e:
-        errors.append(f"common_site_config.json: {e}")
-
-    if errors:
-        return {"status": "error", "message": "Failed: " + "; ".join(errors)}
-
-    return {
-        "status": "success",
-        "message": f"Default site cleared on {bench_name}.",
-    }
 
 
-@frappe.whitelist()
-def install_app_on_site_remote(bench_path, site_name, app_name):
-    """Install an app on a specific site of a remote bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    app_name = sanitize_input(app_name, "App Name")
-    bench_name = os.path.basename(bench_path)
-
-    cmd = ["--site", site_name, "install-app", app_name, "--force"]
-    
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-    return {"status": "started", "message": f"Installing '{app_name}' on {site_name}..."}
 
 
-@frappe.whitelist()
-def uninstall_app_from_site_remote(bench_path, site_name, app_name):
-    """Uninstall an app from a specific site of a remote bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    app_name = sanitize_input(app_name, "App Name")
-    bench_name = os.path.basename(bench_path)
-
-    cmd = ["--site", site_name, "uninstall-app", app_name, "--yes"]
-
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-    return {"status": "started", "message": f"Uninstalling '{app_name}' from {site_name}..."}
 
 
-@frappe.whitelist()
-def remove_app_remote(bench_path, app_name):
-    """Remove an app from a remote bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    app_name = sanitize_input(app_name, "App Name")
-    bench_name = os.path.basename(bench_path)
-
-    cmd = ["remove-app", app_name, "--force"]
-
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-    return {"status": "started", "message": f"Removing '{app_name}' from {bench_name}..."}
 
 
 @frappe.whitelist()
 def get_app_compatibility(app_name, target_bench_path):
     """Check if an app from the host bench is compatible with the target bench version."""
     frappe.only_for("System Manager")
-    target_bench_path = _validate_bench_path(target_bench_path)
+    target_bench_path = get_bench_path()
     host_bench = get_bench_path()
     host_name = os.path.basename(host_bench)
     target_name = os.path.basename(target_bench_path)
@@ -2503,358 +1471,23 @@ def get_app_compatibility(app_name, target_bench_path):
 # ─── Multi-Bench Context APIs ───────────────────────────────────────
 
 
-@frappe.whitelist()
-def list_bench_sites(bench_path):
-    """List all sites on any bench, with status, apps info, and running server info.
-
-    Args:
-        bench_path (str): Path to the target bench.
-
-    Returns:
-        list: List of site dicts with site_name, status, apps, is_current, port, is_running.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    sites_dir = os.path.join(bench_path, "sites")
-    site_data = []
-
-    # Read current/default site from common_site_config.json
-    current_site = None
-    csc_path = os.path.join(sites_dir, "common_site_config.json")
-    if os.path.exists(csc_path):
-        try:
-            with open(csc_path, "r") as f:
-                config = json.load(f)
-                # Primary: use default_site (most reliable, set by set_default_site_on_bench)
-                default = config.get("default_site") or None
-                if default and os.path.isdir(os.path.join(sites_dir, default)):
-                    current_site = default
-                else:
-                    # Fallback: check domain/site mappings for localhost
-                    for key in ("domains", "sites"):
-                        mapping = config.get(key, {})
-                        for hostname, mapped_site in mapping.items():
-                            if hostname in ("localhost", "127.0.0.1"):
-                                if os.path.isdir(os.path.join(sites_dir, mapped_site)):
-                                    current_site = mapped_site
-                                break
-        except Exception:
-            pass
-
-    # Get running site servers for this bench
-    running_servers = _cleanup_dead_servers_for_bench(bench_path)
-
-    try:
-        for item in sorted(os.listdir(sites_dir)):
-            site_dir = os.path.join(sites_dir, item)
-            site_config_path = os.path.join(site_dir, "site_config.json")
-            if not os.path.isdir(site_dir) or not os.path.exists(site_config_path):
-                continue
-
-            status = "Inactive"
-            port = None
-            is_running = False
-
-            try:
-                with open(site_config_path, "r") as f:
-                    sc = json.load(f)
-                    if sc.get("maintenance_mode", 0):
-                        status = "Maintenance"
-                    elif item in running_servers:
-                        status = "Active"
-                        port = running_servers[item].get("port")
-                        is_running = True
-                    elif item == current_site:
-                        status = "Active"
-            except Exception:
-                status = "Unknown"
-
-            apps = []
-            try:
-                apps = _get_site_apps(item, bench_path)
-            except Exception:
-                pass
-
-            site_data.append({
-                "site_name": item,
-                "status": status,
-                "is_current": item == current_site,
-                "is_default": item == current_site,
-                "port": port,
-                "is_running": is_running,
-                "apps": apps,
-            })
-    except Exception as e:
-        frappe.logger("bench_manager").error(f"Error listing sites on {bench_path}: {e}")
-
-    return site_data
 
 
-@frappe.whitelist()
-def list_bench_apps(bench_path):
-    """List all apps on any bench with git info.
-
-    Args:
-        bench_path (str): Path to the target bench.
-
-    Returns:
-        list: List of app dicts with app_name, git_url, branch.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    apps_dir = os.path.join(bench_path, "apps")
-    app_data = []
-
-    has_image_col = frappe.db.has_column("Bench App", "image")
-
-    try:
-        for item in sorted(os.listdir(apps_dir)):
-            app_path = os.path.join(apps_dir, item)
-            if not os.path.isdir(app_path) or item.startswith("."):
-                continue
-
-            app_info = {"app_name": item, "git_url": "", "branch": ""}
-            
-            app_logo_url = ""
-            app_description = ""
-            app_title_from_hooks = ""
-            hooks_path = os.path.join(app_path, item, "hooks.py")
-            if os.path.exists(hooks_path):
-                try:
-                    with open(hooks_path, "r") as f:
-                        for line in f:
-                            if line.startswith("app_logo_url"):
-                                parts = line.split("=")
-                                if len(parts) > 1:
-                                    app_logo_url = parts[1].strip().strip('\'"')
-                            elif line.startswith("app_description"):
-                                parts = line.split("=")
-                                if len(parts) > 1:
-                                    app_description = parts[1].strip().strip('\'"')
-                            elif line.startswith("app_title"):
-                                parts = line.split("=")
-                                if len(parts) > 1:
-                                    app_title_from_hooks = parts[1].strip().strip('\'"')
-                except Exception:
-                    pass
-
-            db_image = ""
-            db_title = ""
-            db_description = ""
-            if frappe.db.exists("Bench App", item):
-                db_image = frappe.db.get_value("Bench App", item, "image") if has_image_col else ""
-                db_title = frappe.db.get_value("Bench App", item, "app_title") if frappe.db.has_column("Bench App", "app_title") else ""
-                db_description = frappe.db.get_value("Bench App", item, "description") if frappe.db.has_column("Bench App", "description") else ""
-
-            app_info["image"] = db_image or app_logo_url
-            app_info["app_title"] = db_title or app_title_from_hooks or item
-            app_info["description"] = db_description or app_description
-
-            try:
-                git_exec = shutil.which("git") or "git"
-                result = subprocess.run(
-                    [git_exec, "remote", "get-url", "origin"],
-                    cwd=app_path, capture_output=True, text=True, timeout=10,
-                )
-                if result.returncode == 0:
-                    app_info["git_url"] = result.stdout.strip()
-
-                result = subprocess.run(
-                    [git_exec, "branch", "--show-current"],
-                    cwd=app_path, capture_output=True, text=True, timeout=10,
-                )
-                if result.returncode == 0:
-                    app_info["branch"] = result.stdout.strip()
-            except Exception:
-                pass
-
-            app_data.append(app_info)
-    except Exception as e:
-        frappe.logger("bench_manager").error(f"Error listing apps on {bench_path}: {e}")
-
-    return app_data
 
 
-@frappe.whitelist()
-def get_app_on_bench(bench_path, git_url, branch="master", app_name="", image=""):
-    """Clone an app from a Git repository onto any bench.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        git_url (str): Git repository URL (HTTPS or SSH).
-        branch (str, optional): Branch to checkout.
-        app_name (str, optional): Guessed app name.
-        image (str, optional): App icon URL.
-
-    Returns:
-        dict: Command execution result.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    git_url = sanitize_git_url(git_url)
-    if branch:
-        branch = sanitize_input(branch, "Branch")
-
-    bench_name = os.path.basename(bench_path)
-    bench_name = os.path.basename(bench_path)
-    cmd = ["get-app", git_url]
-    if branch:
-        cmd.extend(["--branch", branch])
-
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-
-    if app_name and image:
-        try:
-            update_bench_app_details(app_name, image=image)
-        except Exception as e:
-            pass
-
-    return {"status": "started", "message": f"Cloning app onto {bench_name}..."}
 
 
-@frappe.whitelist()
-def create_new_app_on_bench(bench_path, app_name, title="", description="", publisher="", email="", image=""):
-    """Create a new Frappe app on any bench.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        app_name (str): Name of the new app (snake_case).
-        title, description, publisher, email, image: Optional metadata.
-
-    Returns:
-        dict: Command execution result.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    app_name = sanitize_input(app_name, "App Name")
-    bench_name = os.path.basename(bench_path)
-
-    # Check if app already exists
-    if os.path.exists(os.path.join(bench_path, "apps", app_name)):
-        frappe.throw(f"App '{app_name}' already exists on {bench_name}")
-
-    cmd = ["new-app", "--no-git", app_name]
-    input_text = f"{title or app_name}\n{description or ''}\n{publisher or ''}\n{email or ''}\n"
-
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "stdin_data": input_text,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-
-    try:
-        update_bench_app_details(app_name, title=title, description=description, image=image)
-    except Exception as e:
-        frappe.logger("bench_manager").error(f"Failed to update app details for {app_name}: {e}")
-
-    return {"status": "started", "message": f"Creating app '{app_name}' on {bench_name}..."}
 
 
-@frappe.whitelist()
-def create_site_on_bench(bench_path, site_name, admin_password, db_password=None):
-    """Create a new Frappe site on any bench.
-
-    Args:
-        bench_path (str): Path to the target bench.
-        site_name (str): Name of the site to create.
-        admin_password (str): Administrator password for the new site.
-        db_password (str, optional): Database root password.
-
-    Returns:
-        dict: Command execution result.
-    """
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-
-    if not admin_password:
-        frappe.throw("Admin password is required")
-
-    cmd = ["new-site", site_name, "--admin-password", admin_password, "--force"]
-    if db_password:
-        cmd.extend(["--db-root-password", db_password])
-
-    import threading
-    from bench_manager.utils import run_bench_command
-
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-
-    return {"status": "started", "message": f"Creating site '{site_name}' on {bench_name}..."}
 
 
-@frappe.whitelist()
-def drop_site_on_bench(bench_path, site_name, db_password=None, db_root_password=None):
-    """Drop/delete a Frappe site on any bench."""
-    frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
-    site_name = sanitize_input(site_name, "Site Name")
-    bench_name = os.path.basename(bench_path)
-    
-    site_dir = os.path.join(bench_path, "sites", site_name)
-    if not os.path.isdir(site_dir):
-        frappe.throw(f"Site directory '{site_name}' does not exist on {bench_name}")
-
-    cmd = ["drop-site", site_name, "--force", "--no-backup"]
-    # Handle both kwargs gracefully
-    pwd = db_password or db_root_password
-    if pwd:
-        cmd.extend(["--db-root-password", pwd])
-
-    import threading
-    from bench_manager.utils import run_bench_command
-    thread = threading.Thread(
-        target=run_bench_command,
-        kwargs={
-            "command_parts": cmd,
-            "bench_path": bench_path,
-            "user": frappe.session.user,
-            "site": getattr(frappe.local, "site", None)
-        }
-    )
-    thread.daemon = True
-    thread.start()
-
-    return {"status": "started", "message": f"Site deletion for '{site_name}' on {bench_name} has started."}
 
 # ─── Logs ────────────────────────────────────────────────────────────
 
 
 @frappe.whitelist()
-def get_command_logs(limit=50, bench_path=None):
+def get_command_logs(limit=50):
+    bench_path = get_bench_path()
     """Get recent command execution logs.
 
     Args:
@@ -2878,7 +1511,7 @@ def get_command_logs(limit=50, bench_path=None):
     if frappe.db.has_column("Bench Command Log", "bench_path"):
         fields.append("bench_path")
         if bench_path:
-            bench_path = _validate_bench_path(bench_path)
+            bench_path = get_bench_path()
             filters["bench_path"] = bench_path
 
     logs = frappe.get_all(
@@ -2962,7 +1595,7 @@ def get_sse_events(last_id=0):
 
 
 @frappe.whitelist()
-def stream_bench_log(bench_path, lines=50):
+def stream_bench_log(lines=50):
     """Read the last N lines of a bench's startup log file.
 
     Args:
@@ -2973,7 +1606,7 @@ def stream_bench_log(bench_path, lines=50):
         dict: Log content and metadata.
     """
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     log_file = os.path.join(bench_path, "logs", "bench_start.log")
 
     try:
@@ -3002,7 +1635,8 @@ def stream_bench_log(bench_path, lines=50):
 
 
 @frappe.whitelist()
-def get_running_vscode_instances(bench_path=None):
+def get_running_vscode_instances():
+    bench_path = get_bench_path()
     """Get running code-server instances, optionally filtered by bench.
 
     Args:
@@ -3012,7 +1646,7 @@ def get_running_vscode_instances(bench_path=None):
 
     filter_path = None
     if bench_path:
-        filter_path = _validate_bench_path(bench_path)
+        filter_path = get_bench_path()
 
     instances = []
     try:
@@ -3077,7 +1711,7 @@ def stop_code_server(pid):
 
 
 @frappe.whitelist()
-def launch_code_server(bench_path, port=9002):
+def launch_code_server(port=9002):
     """Launch code-server (VS Code in browser) for a given bench directory.
 
     Starts code-server bound to 127.0.0.1 on the specified port, opening
@@ -3092,7 +1726,7 @@ def launch_code_server(bench_path, port=9002):
         dict: Status and URL to access the editor.
     """
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
 
     # Check if this bench is already running a code-server
     running_instances = get_running_vscode_instances()
@@ -3305,10 +1939,10 @@ def get_site_db_connection(bench_path, site_name):
     return conn, conf.get("db_name")
 
 @frappe.whitelist()
-def get_database_tables(bench_path, site_name):
+def get_database_tables(site_name):
     """Get list of tables for a specific site."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     site_name = sanitize_input(site_name, "Site Name")
     
     try:
@@ -3339,10 +1973,10 @@ def get_database_tables(bench_path, site_name):
         return {"status": "error", "message": str(e)}
 
 @frappe.whitelist()
-def get_table_schema(bench_path, site_name, table_name):
+def get_table_schema(site_name, table_name):
     """Get column schema for a specific table."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     site_name = sanitize_input(site_name, "Site Name")
     import re
     if not re.match(r'^[a-zA-Z0-9_ \-\.]+$', table_name):
@@ -3372,10 +2006,10 @@ def get_table_schema(bench_path, site_name, table_name):
         return {"status": "error", "message": str(e)}
 
 @frappe.whitelist()
-def get_table_data(bench_path, site_name, table_name, limit=50, start=0, search=""):
+def get_table_data(site_name, table_name, limit=50, start=0, search=""):
     """Get row data for a specific table."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     site_name = sanitize_input(site_name, "Site Name")
     import re
     if not re.match(r'^[a-zA-Z0-9_ \-\.]+$', table_name):
@@ -3429,10 +2063,10 @@ def get_table_data(bench_path, site_name, table_name, limit=50, start=0, search=
         return {"status": "error", "message": str(e)}
 
 @frappe.whitelist()
-def execute_custom_query(bench_path, site_name, query):
+def execute_custom_query(site_name, query):
     """Execute raw SQL query."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     site_name = sanitize_input(site_name, "Site Name")
     
     if not query or not query.strip():
@@ -3467,10 +2101,10 @@ def execute_custom_query(bench_path, site_name, query):
         return {"status": "error", "message": str(e)}
 
 @frappe.whitelist()
-def update_table_row(bench_path, site_name, table_name, pk_field, pk_value, updates):
+def update_table_row(site_name, table_name, pk_field, pk_value, updates):
     """Update a specific row in a table."""
     frappe.only_for("System Manager")
-    bench_path = _validate_bench_path(bench_path)
+    bench_path = get_bench_path()
     site_name = sanitize_input(site_name, "Site Name")
     
     import re
