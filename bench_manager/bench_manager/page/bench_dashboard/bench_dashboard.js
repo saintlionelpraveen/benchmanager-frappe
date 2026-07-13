@@ -104,7 +104,7 @@ class BenchDashboard {
 			this.setup_site_actions();
 			this.setup_app_actions();
 			this.setup_global_actions();
-			this.setup_jobs_actions();
+			// this.setup_jobs_actions();
 
 			this.setup_log_actions();
 			this.setup_vscode_actions();
@@ -165,24 +165,12 @@ class BenchDashboard {
 			self.$container.find('.tab-pane').removeClass('active');
 			self.$container.find(`#tab-${tab}`).addClass('active');
 
-			// Toggle header illustration
-			if (current_img === 1) {
-				self.$container.find('#header-ill-1').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
-				self.$container.find('#header-ill-2').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
-				current_img = 2;
-			} else {
-				self.$container.find('#header-ill-1').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
-				self.$container.find('#header-ill-2').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
-				current_img = 1;
-			}
-
 			// Load data for selected tab
 			if (tab === 'sites') self.load_sites();
 			else if (tab === 'apps') self.load_apps();
 			else if (tab === 'logs') self.load_logs();
 			else if (tab === 'vscode') self.load_vscode_instances();
 			else if (tab === 'database') self.load_database_browser();
-			else if (tab === 'jobs') self.load_jobs();
 			else if (tab === 'health') {
 				self.load_health();
 				self.$container.find('#btn-refresh-health').off('click').on('click', () => self.load_health());
@@ -489,9 +477,9 @@ class BenchDashboard {
 			
 			const alwaysOnBadge = isBenchManagerSite ? `<span style="font-size:10px;font-weight:700;background:linear-gradient(135deg, #3b82f6, #6366f1);color:white;padding:4px 10px;border-radius:12px;margin-left:8px;box-shadow:0 4px 12px rgba(99,102,241,0.3);letter-spacing:0.5px;text-transform:uppercase;">⚡ ALWAYS ON</span>` : '';
 			
-			const cardBorder = isBenchManagerSite ? 'border: 1px solid rgba(59, 130, 246, 0.3);' : (isActive ? 'border: 1px solid rgba(16, 185, 129, 0.3);' : 'border: 1px solid var(--border-light);');
-			const cardBg = isBenchManagerSite ? 'background: linear-gradient(145deg, var(--card-bg), rgba(59, 130, 246, 0.03));' : (isActive ? 'background: linear-gradient(145deg, var(--card-bg), rgba(16, 185, 129, 0.03));' : 'background: var(--card-bg);');
-			const cardGlow = isBenchManagerSite ? 'box-shadow: 0 10px 40px rgba(59, 130, 246, 0.08);' : (isActive ? 'box-shadow: 0 10px 40px rgba(16, 185, 129, 0.08);' : 'box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);');
+			const cardBorder = isActive ? 'border: 1px solid var(--border-light);' : 'border: 1px solid var(--border-light);';
+			const cardBg = 'background: var(--card-bg);';
+			const cardGlow = 'box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);';
 			
 			const statusDotHtml = isActive ? `<div class="status-pulse-dot" style="width: 10px; height: 10px; border-radius: 50%; background-color: ${statusColor}; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse-green 2s infinite;"></div>` : `<div style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid ${statusColor}; background-color: transparent;"></div>`;
 
@@ -660,17 +648,17 @@ class BenchDashboard {
 						options: `
 						<div style="display: flex; flex-direction: column; gap: 8px;">
 							<div style="margin-bottom: 12px; font-weight: bold; font-size: 16px; color: var(--text-color);">${frappe.utils.escape_html(site_name)}</div>
-							${!isBenchManagerSite && isInactive ? `<button class="btn btn-default text-left modal-site-start" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: var(--status-green); font-size: 18px;">▶</span> Start Site</button>` : ''}
-							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: #f59e0b; font-size: 18px;">■</span> Stop Site</button>` : ''}
-							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🔄 Migrate Site</button>
-							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">💾 Backup Database</button>
-							<button class="btn btn-default text-left modal-site-restore" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">⏱ Restore Database</button>
-							<button class="btn btn-default text-left modal-site-config" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">⚙️ Site Config</button>
-							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🛠 Toggle Maintenance Mode</button>
-							<button class="btn btn-default text-left modal-site-clearcache" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🧹 Clear Site Cache</button>
-							<button class="btn btn-default text-left modal-site-fixtures" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">📦 Export Fixtures</button>
-							<button class="btn btn-default text-left modal-site-tinker" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s; color: #8b5cf6;">🐍 Python Console</button>
-							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;">✕ Drop Site</button>` : ''}
+							${!isBenchManagerSite && isInactive ? `<button class="btn btn-default text-left modal-site-start" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--status-green);"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start Site</button>` : ''}
+							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #f59e0b;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Site</button>` : ''}
+							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l-3.23 3.23"></path></svg> Migrate Site</button>
+							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Backup Database</button>
+							<button class="btn btn-default text-left modal-site-restore" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><polyline points="23 20 23 14 17 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg> Restore Database</button>
+							<button class="btn btn-default text-left modal-site-config" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> Site Config</button>
+							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg> Toggle Maintenance Mode</button>
+							<button class="btn btn-default text-left modal-site-clearcache" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><polyline points="21 3 21 8 16 8"></polyline></svg> Clear Site Cache</button>
+							<button class="btn btn-default text-left modal-site-fixtures" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> Export Fixtures</button>
+							<button class="btn btn-default text-left modal-site-tinker" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s; color: #8b5cf6;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Python Console</button>
+							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Drop Site</button>` : ''}
 						</div>
 						`
 					}
@@ -1834,31 +1822,58 @@ class BenchDashboard {
 					d.$wrapper.find('.frappe-store-item.selected').each(function () { sel.push({ name: $(this).data('app-name'), repo: $(this).data('app-repo') }); });
 					if (!sel.length) { frappe.msgprint('Select at least one app'); return; }
 					d.hide();
-					sel.forEach(a => self.add_pending_app_row(a.name, 'frappe_store', 'Pending...'));
 
-					self.append_console(`Installing ${sel.length} app${sel.length > 1 ? 's' : ''} from Frappe Store...`, 'stdout');
-					self.append_console(`Apps: ${sel.map(a => a.name).join(', ')}`, 'info');
-					let idx = 0;
-					const next = () => {
-						if (idx >= sel.length) {
-							self.append_console(`All ${sel.length} Frappe Store apps have been queued for installation.`, 'success');
-							return;
+					// Ask which site(s) to install the apps on before fetching
+					frappe.call({
+						method: 'bench_manager.api.list_sites',
+						args: {},
+						callback: (r) => {
+							const sites = (r.message || []).map(s => s.site_name || s);
+							const siteDlg = new frappe.ui.Dialog({
+								title: 'Install on Site(s)',
+								fields: [
+									{ fieldtype: 'HTML', options: `<p class="text-muted" style="font-size:13px;">Select the site(s) to install the following app${sel.length > 1 ? 's' : ''} on after downloading:<br><strong>${sel.map(a => a.name).join(', ')}</strong></p>` },
+									{ label: 'Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: sites.map(s => ({ label: s, value: s })), reqd: 1 }
+								],
+								primary_action_label: 'Download & Install',
+								primary_action(vals) {
+									siteDlg.hide();
+									const selectedSites = vals.site_names || [];
+									if (!selectedSites.length) { frappe.msgprint('Please select at least one site.'); return; }
+
+									sel.forEach(a => self.add_pending_app_row(a.name, 'frappe_store', 'Pending...'));
+									self.append_console(`Installing ${sel.length} app${sel.length > 1 ? 's' : ''} from Frappe Store...`, 'stdout');
+									self.append_console(`Apps: ${sel.map(a => a.name).join(', ')}`, 'info');
+									self.append_console(`Target sites: ${selectedSites.join(', ')}`, 'info');
+
+									let idx = 0;
+									const next = () => {
+										if (idx >= sel.length) {
+											self.append_console(`All ${sel.length} Frappe Store app${sel.length > 1 ? 's' : ''} queued for installation.`, 'success');
+											return;
+										}
+										const a = sel[idx];
+										self.append_console(`Fetching & installing ${a.name} on ${selectedSites.join(', ')}...`, 'command');
+										self.show_live_activity('frappe-store');
+										self.start_pending_op();
+
+										frappe.call({
+											method: 'bench_manager.api.get_and_install_app',
+											args: {
+												git_url: a.repo,
+												site_names: JSON.stringify(selectedSites),
+												branch: '',
+												app_name: a.name
+											},
+											callback: () => { idx++; setTimeout(next, 500); }
+										});
+									};
+									next();
+								}
+							});
+							siteDlg.show();
 						}
-						const a = sel[idx];
-						self.append_console(`Installing ${a.name}...`, 'command');
-						self.append_console(`Fetching ${a.name}...`, 'stdout');
-						self.show_live_activity('frappe-store');
-
-						const store_method = 'bench_manager.api.get_app';
-						const store_args = { git_url: a.repo, branch: '' };
-
-						frappe.call({
-							method: store_method,
-							args: store_args,
-							callback: () => { idx++; setTimeout(next, 800); }
-						});
-					};
-					next();
+					});
 				}
 			}
 		});
@@ -2674,33 +2689,63 @@ class BenchDashboard {
 		const $tab = this.$container.find('#tab-health');
 		if (!$tab.hasClass('active')) return;
 
+		if (!this.health_charts_initialized) {
+			this.health_charts_initialized = true;
+			this.health_history_limit = 20;
+			this.health_live_data = {
+				labels: Array(this.health_history_limit).fill(''),
+				datasets: [
+					{ name: "CPU", values: Array(this.health_history_limit).fill(0) },
+					{ name: "Memory", values: Array(this.health_history_limit).fill(0) },
+					{ name: "Disk", values: Array(this.health_history_limit).fill(0) }
+				]
+			};
+
+			this.cpu_chart = new frappe.Chart("#health-cpu-chart", { type: 'donut', data: { labels: ["CPU", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#3b82f6', '#f1f5f9'], maxSlices: 2 });
+			this.mem_chart = new frappe.Chart("#health-mem-chart", { type: 'donut', data: { labels: ["Memory", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#10b981', '#f1f5f9'], maxSlices: 2 });
+			this.disk_chart = new frappe.Chart("#health-disk-chart", { type: 'donut', data: { labels: ["Disk", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#f59e0b', '#f1f5f9'], maxSlices: 2 });
+			
+			this.health_live_chart = new frappe.Chart("#health-live-chart", {
+				title: "",
+				data: this.health_live_data,
+				type: 'line',
+				height: 280,
+				colors: ['#3b82f6', '#10b981', '#f59e0b'],
+				axisOptions: { xIsSeries: true, xAxisMode: 'tick' },
+				lineOptions: { regionFill: 1, hideDots: 1, spline: 1 }
+			});
+		}
+
 		frappe.call({
 			method: 'bench_manager.api.get_server_health',
 			callback: (r) => {
 				const health = r.message;
 				if (health && health.status === 'success') {
-					this.$container.find('#health-cpu-text').text(`${health.cpu}%`);
-					this.$container.find('#health-cpu-bar').css('width', `${health.cpu}%`);
-					
-					if (health.cpu > 80) this.$container.find('#health-cpu-bar').css('background', '#ef4444');
-					else if (health.cpu > 50) this.$container.find('#health-cpu-bar').css('background', '#f59e0b');
-					else this.$container.find('#health-cpu-bar').css('background', '#3b82f6');
+					this.cpu_chart.update({ labels: ["CPU", "Free"], datasets: [{ values: [health.cpu, Math.max(0, 100 - health.cpu)] }] });
+					this.$container.find('#health-cpu-details').text('Load Average: ' + health.cpu + '%');
 
-					this.$container.find('#health-mem-text').text(`${health.memory.percent}%`);
-					this.$container.find('#health-mem-bar').css('width', `${health.memory.percent}%`);
+					this.mem_chart.update({ labels: ["Memory", "Free"], datasets: [{ values: [health.memory.percent, Math.max(0, 100 - health.memory.percent)] }] });
 					this.$container.find('#health-mem-details').text(`${(health.memory.used / 1073741824).toFixed(2)} GB / ${(health.memory.total / 1073741824).toFixed(2)} GB`);
-					
-					if (health.memory.percent > 85) this.$container.find('#health-mem-bar').css('background', '#ef4444');
-					else if (health.memory.percent > 65) this.$container.find('#health-mem-bar').css('background', '#f59e0b');
-					else this.$container.find('#health-mem-bar').css('background', '#10b981');
 
-					this.$container.find('#health-disk-text').text(`${health.disk.percent}%`);
-					this.$container.find('#health-disk-bar').css('width', `${health.disk.percent}%`);
+					this.disk_chart.update({ labels: ["Disk", "Free"], datasets: [{ values: [health.disk.percent, Math.max(0, 100 - health.disk.percent)] }] });
 					this.$container.find('#health-disk-details').text(`${(health.disk.used / 1073741824).toFixed(2)} GB / ${(health.disk.total / 1073741824).toFixed(2)} GB`);
+
+					const now = new Date();
+					const timeLabel = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
 					
-					if (health.disk.percent > 90) this.$container.find('#health-disk-bar').css('background', '#ef4444');
-					else if (health.disk.percent > 70) this.$container.find('#health-disk-bar').css('background', '#f59e0b');
-					else this.$container.find('#health-disk-bar').css('background', '#f59e0b');
+					this.health_live_data.labels.shift();
+					this.health_live_data.labels.push(timeLabel);
+					
+					this.health_live_data.datasets[0].values.shift();
+					this.health_live_data.datasets[0].values.push(health.cpu);
+					
+					this.health_live_data.datasets[1].values.shift();
+					this.health_live_data.datasets[1].values.push(health.memory.percent);
+					
+					this.health_live_data.datasets[2].values.shift();
+					this.health_live_data.datasets[2].values.push(health.disk.percent);
+					
+					this.health_live_chart.update(this.health_live_data);
 				}
 			}
 		});

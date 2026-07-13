@@ -5,17 +5,22 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
       - master
 
+env:
+  DOCKER_IMAGE: messitebi/bench-manager
+
 jobs:
   # -------------------------------------------------------------
-  # CI: Basic Checks
+  # CI: Lint, Compile, and Validate
   # -------------------------------------------------------------
   ci:
-    name: Continuous Integration (Basic Checks)
+    name: Continuous Integration
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -26,24 +31,36 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Run Basic Checks
+      - name: Compile Python files (syntax check)
+        run: python -m compileall bench_manager/
+
+      - name: Validate Dockerfile
         run: |
-          echo "Running basic sanity checks..."
-          # Example basic check: compile Python files to catch syntax errors
-          python -m compileall bench_manager/
+          docker build --check . 2>/dev/null || echo "Docker build check not supported, skipping"
+
+      - name: Validate docker-compose.yml
+        run: |
+          docker compose config --quiet 2>/dev/null || echo "Compose validation skipped"
 
   # -------------------------------------------------------------
-  # CD: Continuous Deployment (Requires Approval)
+  # CD: Build and Push Docker Image
   # -------------------------------------------------------------
   cd:
-    name: Continuous Deployment
+    name: Build & Push Docker Image
     needs: ci
-    # This triggers the approval process you set up in GitHub Environments
+    if: github.event_name == 'push'
     environment: production
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,10 +71,37 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          # Update this image name if your Docker Hub repo name is different
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/benchmanager-frappe:latest
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKER_IMAGE }}
+          short-description: "Bench Manager - All-in-One Frappe Bench Manager"
+          readme-filepath: ./README.md

@@ -15,6 +15,7 @@ bench_manager/notification.py
 bench_manager/patches.txt
 bench_manager/test_api.py
 bench_manager/test_api2.py
+bench_manager/test_jobs.py
 bench_manager/utils.py
 bench_manager.egg-info/PKG-INFO
 bench_manager.egg-info/SOURCES.txt

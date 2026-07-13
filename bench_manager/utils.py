@@ -10,6 +10,18 @@ import shutil
 import subprocess
 import frappe
 
+# Compiled pattern to detect noisy git progress lines
+_GIT_PROGRESS_RE = re.compile(
+    r"(?:remote:\s+)?"
+    r"(?:Counting objects|Compressing objects|Receiving objects|Resolving deltas)"
+    r":\s+\d+%"
+)
+
+
+def _is_git_progress(line):
+    """Return True if the line is a noisy git progress percentage line."""
+    return bool(_GIT_PROGRESS_RE.search(line))
+
 
 def get_bench_path():
     """Auto-detect the bench directory path.
@@ -127,8 +139,11 @@ def sanitize_git_url(url):
             frappe.throw(f"Invalid git URL: contains forbidden character '{char}'")
 
     # Validate URL format
-    https_pattern = r"^https?://[a-zA-Z0-9._\-/]+(?:\.git)?$"
-    ssh_pattern = r"^git@[a-zA-Z0-9._\-]+:[a-zA-Z0-9._\-/]+(?:\.git)?$"
+    # Explicitly list all allowed characters to avoid range-interpretation
+    # bugs with underscore. Also support @ and : for token-authenticated URLs.
+    _seg = r"[a-zA-Z0-9._\-~@:%]+"   # allowed path/auth segment characters
+    https_pattern = rf"^https?://{_seg}(?:/{_seg})*(?:\.git)?/?$"
+    ssh_pattern   = r"^git@[a-zA-Z0-9._\-]+:[a-zA-Z0-9._\-~/]+(?:\.git)?$"
 
     if not re.match(https_pattern, url) and not re.match(ssh_pattern, url):
         frappe.throw("Invalid git URL format. Use HTTPS or SSH URL.")
@@ -299,7 +314,9 @@ def run_bench_command(command_parts, bench_path=None, realtime=True, user=None, 
                     clean_msg = buffer.strip()
                     if clean_msg:
                         output_lines.append(clean_msg)
-                        _publish(clean_msg)
+                        # Suppress noisy git progress lines from realtime output
+                        if not _is_git_progress(clean_msg):
+                            _publish(clean_msg)
                     buffer = ""
                 else:
                     buffer += char

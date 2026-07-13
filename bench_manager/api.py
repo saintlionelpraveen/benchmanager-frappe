@@ -23,6 +23,20 @@ from bench_manager.utils import (
     sanitize_input,
 )
 
+import re as _re
+
+# Compiled pattern to detect noisy git progress lines that flood the console
+_GIT_PROGRESS_RE = _re.compile(
+    r"(?:remote:\s+)?"
+    r"(?:Counting objects|Compressing objects|Receiving objects|Resolving deltas)"
+    r":\s+\d+%"
+)
+
+
+def _is_git_progress(line):
+    """Return True if the line is a noisy git progress percentage line."""
+    return bool(_GIT_PROGRESS_RE.search(line))
+
 
 # ─── Site Management ────────────────────────────────────────────────
 
@@ -217,6 +231,9 @@ def check_site_active(site_name):
     if is_host_site:
         return {"active": True, "is_host_site": True, "port": None}
 
+    if os.environ.get("BENCH_MANAGER_AIO"):
+        return {"active": True, "is_host_site": False, "port": None}
+
     # Check if a dev server is running for this site
     servers = _cleanup_dead_servers()
     if site_name in servers:
@@ -355,6 +372,23 @@ def get_site_open_url(site_name):
             "url": None,  # Signal to JS to use current window location
             "is_bench_manager": True,
             "port": port,
+        }
+
+    if os.environ.get("BENCH_MANAGER_AIO"):
+        current_host = frappe.utils.get_url()
+        scheme = current_host.split("://")[0]
+        port_part = ""
+        if ":" in current_host.split("://")[-1]:
+            port_part = ":" + current_host.split("://")[-1].split(":")[-1]
+            
+        hostname = site_name
+        if "." not in hostname:
+            hostname = f"{hostname}.localhost"
+            
+        return {
+            "url": f"{scheme}://{hostname}{port_part}",
+            "is_running": True,
+            "port": None
         }
 
     # For other sites, check if a dev server is running
@@ -693,7 +727,7 @@ def get_app(git_url, branch="master", app_name="", image=""):
     if branch:
         branch = sanitize_input(branch, "Branch")
 
-    cmd = ["get-app", git_url]
+    cmd = ["get-app", git_url, "--skip-assets"]
     if branch:
         cmd.extend(["--branch", branch])
 
@@ -751,6 +785,185 @@ def install_app(site_name, app_name):
     thread.start()
 
     return {"status": "started", "message": f"Installing '{app_name}' on '{site_name}' has started."}
+
+
+@frappe.whitelist()
+def get_and_install_app(git_url, site_names, branch="", app_name="", image=""):
+    """Fetch an app from a Git URL then install it on one or more sites, sequentially.
+
+    This avoids the race condition where ``bench install-app`` fires before
+    ``bench get-app`` has finished updating ``apps.txt``.
+
+    Args:
+        git_url (str): Git repository URL.
+        site_names (str | list): Site name(s) to install the app on after fetching.
+        branch (str, optional): Git branch to fetch.
+        app_name (str, optional): Guessed app name (for UI labelling only).
+        image (str, optional): App icon URL.
+
+    Returns:
+        dict: Status dict.
+    """
+    frappe.only_for("System Manager")
+
+    git_url = sanitize_git_url(git_url)
+    if branch:
+        branch = sanitize_input(branch, "Branch")
+
+    # site_names may arrive as a JSON string from frappe.call
+    if isinstance(site_names, str):
+        try:
+            import json as _json
+            site_names = _json.loads(site_names)
+        except Exception:
+            site_names = [site_names]
+
+    site_names = [sanitize_input(s, "Site Name") for s in site_names if s]
+
+    # Capture values before the thread starts (frappe.local is request-scoped)
+    _user = frappe.session.user
+    _site = frappe.local.site
+
+    import threading
+    from bench_manager.utils import get_bench_path
+
+    def _task():
+        try:
+            from bench_manager.api import push_sse_event
+            def publish(msg, msg_type="stdout"):
+                try:
+                    push_sse_event(msg, msg_type)
+                except Exception:
+                    pass
+                try:
+                    frappe.publish_realtime(
+                        "bench_console",
+                        {"message": msg, "msg_type": msg_type},
+                        room="all",
+                        after_commit=False,
+                    )
+                except Exception:
+                    pass
+
+            bench_path = get_bench_path()
+
+            # ── Step 1: bench get-app ─────────────────────────────────────
+            get_cmd = ["get-app", git_url, "--skip-assets"]
+            if branch:
+                get_cmd += ["--branch", branch]
+
+            publish(f"$ bench {' '.join(get_cmd)}", "command")
+
+            proc = subprocess.Popen(
+                ["bench"] + get_cmd,
+                cwd=bench_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for line in proc.stdout:
+                stripped = line.rstrip()
+                # Filter out noisy git progress lines (Counting/Compressing/Receiving/Resolving %)
+                if stripped and not _is_git_progress(stripped):
+                    publish(stripped)
+            proc.wait()
+
+            if proc.returncode != 0:
+                publish(f"bench get-app failed (exit {proc.returncode}).", "error")
+                return
+
+            publish("App fetched successfully.", "success")
+
+            # ── Step 1b: Ensure Python package is in venv ─────────────────
+            # bench get-app uses `uv pip` which may race or use a different
+            # Python. Explicitly pip install -e to guarantee importability.
+            _app = app_name or git_url.rstrip("/").split("/")[-1].replace(".git", "")
+            app_dir = os.path.join(bench_path, "apps", _app)
+            python_exec = os.path.join(bench_path, "env", "bin", "python")
+            if os.path.isdir(app_dir) and os.path.exists(python_exec):
+                publish(f"$ pip install -e apps/{_app}", "command")
+                pip_proc = subprocess.Popen(
+                    [python_exec, "-m", "pip", "install", "--quiet", "-e", app_dir],
+                    cwd=bench_path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in pip_proc.stdout:
+                    if line.strip():
+                        publish(line.rstrip())
+                pip_proc.wait()
+                if pip_proc.returncode != 0:
+                    publish(f"pip install failed (exit {pip_proc.returncode}). Continuing anyway.", "stdout")
+                else:
+                    publish(f"Python package '{_app}' installed in venv.", "stdout")
+
+            # ── Step 1c: Build UI frontend if package.json exists in frontend/ ──
+            frontend_dir = os.path.join(bench_path, "apps", _app, "frontend")
+            if os.path.isdir(frontend_dir) and os.path.exists(os.path.join(frontend_dir, "package.json")):
+                publish(f"Found frontend/package.json for '{_app}'. Building frontend...", "stdout")
+                publish(f"$ yarn install && yarn build (in apps/{_app}/frontend)", "command")
+                yarn_proc = subprocess.Popen(
+                    "yarn install && yarn build",
+                    shell=True,
+                    cwd=frontend_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in yarn_proc.stdout:
+                    if line.strip():
+                        publish(line.rstrip())
+                yarn_proc.wait()
+                if yarn_proc.returncode != 0:
+                    publish(f"Frontend build failed (exit {yarn_proc.returncode}).", "error")
+                else:
+                    publish(f"Frontend for '{_app}' built successfully.", "success")
+
+            # ── Step 2: bench --site <site> install-app <app> ─────────────
+
+            for site in site_names:
+                install_cmd = ["--site", site, "install-app", _app, "--force"]
+                publish(f"$ bench {' '.join(install_cmd)}", "command")
+
+                proc2 = subprocess.Popen(
+                    ["bench"] + install_cmd,
+                    cwd=bench_path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in proc2.stdout:
+                    publish(line.rstrip())
+                proc2.wait()
+
+                if proc2.returncode != 0:
+                    publish(f"install-app on '{site}' failed (exit {proc2.returncode}).", "error")
+                else:
+                    publish(f"'{_app}' installed on '{site}' successfully.", "success")
+
+        except Exception as exc:
+            try:
+                frappe.publish_realtime(
+                    "bench_console",
+                    {"message": str(exc), "msg_type": "error"},
+                    room="all",
+                    after_commit=False,
+                )
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_task)
+    thread.daemon = True
+    thread.start()
+
+    if app_name and image:
+        try:
+            update_bench_app_details(app_name, image=image)
+        except Exception:
+            pass
+
+    return {"status": "started", "message": f"Fetching and installing '{git_url}' has started."}
 
 
 @frappe.whitelist()
@@ -928,20 +1141,57 @@ def update_bench():
 
 @frappe.whitelist()
 def update_bench_app(app_name):
-    """Run bench update --app to update a specific app."""
+    """Run git pull and build to update a specific app safely."""
     frappe.only_for("System Manager")
     app_name = sanitize_input(app_name, "App Name")
 
     import threading
-    from bench_manager.utils import run_bench_command as _run_bench_command
-    thread = threading.Thread(
-        target=_run_bench_command,
-        kwargs={
-            "command_parts": ["update", "--apps", app_name, "--no-backup"],
-            "user": frappe.session.user,
-            "site": frappe.local.site
-        }
-    )
+    
+    def update_task():
+        try:
+            from bench_manager.api import push_sse_event
+            def publish(msg, msg_type="stdout"):
+                try: push_sse_event(msg, msg_type)
+                except: pass
+                try: frappe.publish_realtime("bench_console", {"message": msg, "msg_type": msg_type}, room="all", after_commit=False)
+                except: pass
+
+            bench_path = get_bench_path()
+            app_path = os.path.join(bench_path, "apps", app_name)
+            
+            if not os.path.exists(app_path):
+                publish(f"Error: App {app_name} not found", "error")
+                return
+
+            publish(f"$ git pull (in apps/{app_name})", "command")
+            res = subprocess.run(["git", "pull"], cwd=app_path, capture_output=True, text=True)
+            publish(res.stdout + "\n" + res.stderr)
+            
+            if res.returncode != 0:
+                publish("Git pull failed, aborting update.", "error")
+                return
+            
+            publish(f"$ bench build --app {app_name}", "command")
+            res = subprocess.run(["bench", "build", "--app", app_name], cwd=bench_path, capture_output=True, text=True)
+            publish(res.stdout + "\n" + res.stderr)
+            
+            frontend_dir = os.path.join(bench_path, "apps", app_name, "frontend")
+            if os.path.isdir(frontend_dir) and os.path.exists(os.path.join(frontend_dir, "package.json")):
+                publish(f"Found frontend/package.json for '{app_name}'. Building frontend...", "stdout")
+                publish(f"$ yarn install && yarn build (in apps/{app_name}/frontend)", "command")
+                res2 = subprocess.run("yarn install && yarn build", shell=True, cwd=frontend_dir, capture_output=True, text=True)
+                publish(res2.stdout + "\n" + res2.stderr)
+            
+            publish(f"$ bench restart", "command")
+            res = subprocess.run(["bench", "restart"], cwd=bench_path, capture_output=True, text=True)
+            publish(res.stdout + "\n" + res.stderr)
+            
+            publish(f"App '{app_name}' updated successfully.", "success")
+            
+        except Exception as e:
+            publish(f"Error: {str(e)}", "error")
+
+    thread = threading.Thread(target=update_task)
     thread.daemon = True
     thread.start()
 

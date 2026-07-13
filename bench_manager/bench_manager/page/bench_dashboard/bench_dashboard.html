@@ -8,31 +8,24 @@
 				Global Config
 			</button>
 		</div>
-		<!-- Right: Illustration -->
-		<div style="display: flex; align-items: flex-end; gap: 24px;">
-			<div class="header-illustration-wrapper" style="height: 80px; width: 160px; position: relative;">
-				<img id="header-ill-1" src="/assets/bench_manager/images/img2.png" style="position: absolute; height: 110px; bottom: -20px; right: 0; transition: all 0.8s; opacity: 1; z-index: 10; pointer-events: none;">
-				<img id="header-ill-2" src="/assets/bench_manager/images/img3.png" style="position: absolute; height: 110px; bottom: -20px; right: 0; transition: all 0.8s; opacity: 0; z-index: 10; pointer-events: none;">
-			</div>
-		</div>
 	</div>
-	<div class="bench-status-bar">
-		<div class="status-item">
-			<span class="status-icon sites-icon">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-			</span>
+	<div class="bench-status-bar" style="display: flex; gap: 20px; margin-bottom: 24px;">
+		<div class="status-item premium-card" style="flex: 1; display: flex; align-items: center; padding: 20px 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+			<div class="status-icon" style="width: 48px; height: 48px; border-radius: 10px; background: var(--bg-light-gray); color: var(--text-color); display: flex; align-items: center; justify-content: center; margin-right: 16px;">
+				<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+			</div>
 			<div class="status-info">
-				<span class="status-label">Active Sites</span>
-				<span class="status-value" id="status-sites-count">—</span>
+				<div class="status-label" style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Active Sites</div>
+				<div class="status-value" id="status-sites-count" style="font-size: 28px; font-weight: 700; color: var(--text-color); line-height: 1;">—</div>
 			</div>
 		</div>
-		<div class="status-item">
-			<span class="status-icon apps-icon">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-			</span>
+		<div class="status-item premium-card" style="flex: 1; display: flex; align-items: center; padding: 20px 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+			<div class="status-icon" style="width: 48px; height: 48px; border-radius: 10px; background: var(--bg-light-gray); color: var(--text-color); display: flex; align-items: center; justify-content: center; margin-right: 16px;">
+				<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+			</div>
 			<div class="status-info">
-				<span class="status-label">Total Apps</span>
-				<span class="status-value" id="status-apps-count">—</span>
+				<div class="status-label" style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Total Apps</div>
+				<div class="status-value" id="status-apps-count" style="font-size: 28px; font-weight: 700; color: var(--text-color); line-height: 1;">—</div>
 			</div>
 		</div>
 	</div>
@@ -61,10 +54,7 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
 				Database
 			</button>
-			<button class="bench-tab" data-tab="jobs">
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-				Jobs
-			</button>
+
 			<button class="bench-tab" data-tab="health">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
 				Health
@@ -317,45 +307,7 @@
 			</div>
 		</div>
 		
-		<!-- Background Jobs Tab -->
-		<div class="tab-pane" id="tab-jobs">
-			<div class="tab-actions" style="display: flex; justify-content: space-between; align-items: center;">
-				<h3 style="margin: 0; font-size: 18px; font-weight: 600;">Redis Queues</h3>
-				<button class="btn btn-default btn-sm" id="btn-refresh-jobs">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-					Refresh
-				</button>
-			</div>
-			
-			<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Short Queue</div>
-					<div id="queue-short-count" style="font-size: 36px; font-weight: 700; color: #3b82f6;">0</div>
-					<div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">Pending Jobs</div>
-				</div>
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Default Queue</div>
-					<div id="queue-default-count" style="font-size: 36px; font-weight: 700; color: #10b981;">0</div>
-					<div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">Pending Jobs</div>
-				</div>
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Long Queue</div>
-					<div id="queue-long-count" style="font-size: 36px; font-weight: 700; color: #f59e0b;">0</div>
-					<div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">Pending Jobs</div>
-				</div>
-			</div>
-			
-			<div class="premium-card" style="margin-top: 20px; padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
-				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-					<div style="font-size: 14px; font-weight: 600; color: var(--text-color);">Live Queue Activity</div>
-					<div style="display: flex; align-items: center; gap: 8px;">
-						<span class="status-pulse-dot" style="background-color: var(--status-green);"></span>
-						<span style="font-size: 12px; color: var(--text-muted);">Live Sync</span>
-					</div>
-				</div>
-				<div id="jobs-live-chart" style="height: 300px; width: 100%;"></div>
-			</div>
-		</div>
+
 		
 		<!-- Health Tab -->
 		<div class="tab-pane" id="tab-health">
@@ -366,30 +318,38 @@
 					Refresh
 				</button>
 			</div>
+			<style>
+				.health-card .chart-legend {
+					display: none !important;
+				}
+			</style>
 			<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;">
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 14px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">CPU Usage</div>
-					<div id="health-cpu-text" style="font-size: 36px; font-weight: 700; color: #3b82f6;">0%</div>
-					<div style="width: 100%; height: 8px; background: var(--bg-light-gray); border-radius: 4px; margin-top: 16px; overflow: hidden;">
-						<div id="health-cpu-bar" style="width: 0%; height: 100%; background: #3b82f6; transition: width 0.5s ease;"></div>
+				<div class="premium-card health-card" style="padding: 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
+					<div style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">CPU Usage</div>
+					<div id="health-cpu-chart" style="height: 180px; width: 100%; margin-bottom: -15px;"></div>
+					<div id="health-cpu-details" style="font-size: 13px; color: var(--text-color); margin-top: 0px; font-weight: 500;">Load Average</div>
+				</div>
+				<div class="premium-card health-card" style="padding: 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
+					<div style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">Memory Usage</div>
+					<div id="health-mem-chart" style="height: 180px; width: 100%; margin-bottom: -15px;"></div>
+					<div id="health-mem-details" style="font-size: 13px; color: var(--text-color); margin-top: 0px; font-weight: 500;">0 GB / 0 GB</div>
+				</div>
+				<div class="premium-card health-card" style="padding: 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
+					<div style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">Disk Usage</div>
+					<div id="health-disk-chart" style="height: 180px; width: 100%; margin-bottom: -15px;"></div>
+					<div id="health-disk-details" style="font-size: 13px; color: var(--text-color); margin-top: 0px; font-weight: 500;">0 GB / 0 GB</div>
+				</div>
+			</div>
+			
+			<div class="premium-card" style="margin-top: 20px; padding: 24px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+					<div style="font-size: 14px; font-weight: 600; color: var(--text-color);">Live Resource Activity</div>
+					<div style="display: flex; align-items: center; gap: 8px;">
+						<span class="status-pulse-dot" style="background-color: #10b981; width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+						<span style="font-size: 12px; color: var(--text-muted);">Live Sync</span>
 					</div>
 				</div>
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 14px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">Memory Usage</div>
-					<div id="health-mem-text" style="font-size: 36px; font-weight: 700; color: #10b981;">0%</div>
-					<div style="width: 100%; height: 8px; background: var(--bg-light-gray); border-radius: 4px; margin-top: 16px; overflow: hidden;">
-						<div id="health-mem-bar" style="width: 0%; height: 100%; background: #10b981; transition: width 0.5s ease;"></div>
-					</div>
-					<div id="health-mem-details" style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">0 GB / 0 GB</div>
-				</div>
-				<div class="premium-card" style="padding: 24px; border-radius: 16px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center;">
-					<div style="font-size: 14px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px;">Disk Usage</div>
-					<div id="health-disk-text" style="font-size: 36px; font-weight: 700; color: #f59e0b;">0%</div>
-					<div style="width: 100%; height: 8px; background: var(--bg-light-gray); border-radius: 4px; margin-top: 16px; overflow: hidden;">
-						<div id="health-disk-bar" style="width: 0%; height: 100%; background: #f59e0b; transition: width 0.5s ease;"></div>
-					</div>
-					<div id="health-disk-details" style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">0 GB / 0 GB</div>
-				</div>
+				<div id="health-live-chart" style="height: 300px; width: 100%;"></div>
 			</div>
 		</div>
 
