@@ -28,9 +28,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
-          memory: 512M
+          memory: 1G
     logging:
       driver: "json-file"
       options:
@@ -38,25 +38,6 @@ services:
         max-file: "5"
     # Graceful shutdown: give services 60s to stop
     stop_grace_period: 60s
-    # Security: drop all unnecessary capabilities
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-      - NET_BIND_SERVICE
-      - KILL
-      - SYS_CHROOT
-    # Prevent privilege escalation
-    security_opt:
-      - no-new-privileges:true
-    # Tmpfs for ephemeral data
-    tmpfs:
-      - /tmp:size=256M
-      - /run:size=64M
 
 volumes:
   bench_manager_mysql:

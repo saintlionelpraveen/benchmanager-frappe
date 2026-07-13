@@ -444,20 +444,11 @@ docker run -d \
     -v bench_manager_supervisor_logs:/var/log/supervisor \
     -e "MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}" \
     -e "FRAPPE_ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
-    --memory=2g \
-    --memory-reservation=512m \
-    --cap-drop=ALL \
-    --cap-add=CHOWN \
-    --cap-add=DAC_OVERRIDE \
-    --cap-add=FOWNER \
-    --cap-add=SETGID \
-    --cap-add=SETUID \
-    --cap-add=NET_BIND_SERVICE \
-    --cap-add=KILL \
-    --cap-add=SYS_CHROOT \
-    --security-opt=no-new-privileges:true \
+    --memory=4g \
+    --memory-reservation=1g \
     --stop-timeout=60 \
     --log-driver=json-file \
+    --log-opt max-size=50m \
     --log-opt max-file=5 \
     "$DOCKER_IMAGE"
 
