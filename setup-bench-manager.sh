@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────
-DOCKER_IMAGE="messitebi/benchmanager-frappe:latest"
+DOCKER_IMAGE="messitebi/bench-manager:latest"
 CONTAINER_NAME="bench-manager"
 DEFAULT_PORT=9001
 ADMIN_PASSWORD="${FRAPPE_ADMIN_PASSWORD:-admin}"
