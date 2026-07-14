@@ -5,17 +5,16 @@ on:
     branches:
       - main
       - master
-  pull_request:
-    branches:
-      - main
-      - master
+
+env:
+  DOCKER_IMAGE: messitebi/bench-manager
 
 jobs:
   # -------------------------------------------------------------
-  # CI: Basic Checks
+  # CI: Lint and Validate
   # -------------------------------------------------------------
   ci:
-    name: Continuous Integration (Basic Checks)
+    name: CI - Validate Code
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -26,21 +25,18 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Run Basic Checks
-        run: |
-          echo "Running basic sanity checks..."
-          # Example basic check: compile Python files to catch syntax errors
-          python -m compileall bench_manager/
+      - name: Compile Python files (syntax check)
+        run: python -m compileall bench_manager/
 
   # -------------------------------------------------------------
-  # CD: Continuous Deployment (Requires Approval)
+  # CD: Build and Push Docker Image
   # -------------------------------------------------------------
   cd:
-    name: Continuous Deployment
+    name: CD - Build & Push Docker Image
     needs: ci
-    # This triggers the approval process you set up in GitHub Environments
-    environment: production
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,5 +55,6 @@ jobs:
         with:
           context: .
           push: true
-          # Update this image name if your Docker Hub repo name is different
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/benchmanager-frappe:latest
+          tags: ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

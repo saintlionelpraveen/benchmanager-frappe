@@ -1,15 +1,63 @@
+# Version control
 .git
 .github
+.gitignore
+
+# Python
 *.pyc
 __pycache__
 *.egg-info
+*.eggs
+.eggs
+*.pyo
+.mypy_cache
+.pytest_cache
+.tox
+.coverage
+htmlcov/
+
+# Environment
 .env
+.env.*
+*.env
+
+# Docker
 docker-compose.yml
 docker-compose-one-step.yml
 .dockerignore
 Dockerfile
+
+# IDE
 .vscode
 .idea
+*.swp
+*.swo
+*~
+
+# Node
 node_modules
+
+# Build artifacts
+dist/
+build/
+
+# Deployment scripts (not needed inside image)
 deploy.sh
 install.sh
+setup.sh
+setup-bench-manager.sh
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Test files
+test_*.py
+recover_js.py
+*.test.js
+
+# Temporary
+*.log
+*.tmp
+tmp/

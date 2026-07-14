@@ -1,0 +1,50 @@
+# ============================================================
+# Bench Manager - Production Docker Compose
+# Single-container deployment with persistent volumes
+# Usage: docker compose up -d
+# ============================================================
+
+services:
+  bench-manager:
+    image: messitebi/bench-manager:latest
+    container_name: bench-manager
+    restart: unless-stopped
+    ports:
+      - "${BENCH_MANAGER_PORT:-9001}:8080"
+    volumes:
+      - bench_manager_mysql:/var/lib/mysql
+      - bench_manager_sites:/home/frappe/frappe-bench/sites
+      - bench_manager_logs:/home/frappe/frappe-bench/logs
+      - bench_manager_supervisor_logs:/var/log/supervisor
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-admin}
+      - FRAPPE_ADMIN_PASSWORD=${FRAPPE_ADMIN_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/method/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # Graceful shutdown: give services 60s to stop
+    stop_grace_period: 60s
+
+volumes:
+  bench_manager_mysql:
+    name: bench_manager_mysql
+  bench_manager_sites:
+    name: bench_manager_sites
+  bench_manager_logs:
+    name: bench_manager_logs
+  bench_manager_supervisor_logs:
+    name: bench_manager_supervisor_logs

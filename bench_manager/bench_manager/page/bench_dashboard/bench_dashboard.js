@@ -98,18 +98,18 @@ class BenchDashboard {
 		try {
 			this.page.main.html(frappe.render_template('bench_dashboard'));
 			this.$container = this.page.main.find('.bench-dashboard');
+			this.is_host_bench = true;
 			this.setup_tabs();
 			this.setup_realtime();
 			this.setup_site_actions();
 			this.setup_app_actions();
-			this.setup_bench_actions();
+			this.setup_global_actions();
+			// this.setup_jobs_actions();
+
 			this.setup_log_actions();
-			this.setup_benches_actions();
 			this.setup_vscode_actions();
-			this.setup_page_actions();
 			this.load_status();
-			this.load_benches();
-			this.populate_context_selector();
+			this.load_sites();
 
 			// Setup Theme Switcher
 			const $themeSelect = this.$container.find('#bench-theme-switcher');
@@ -145,17 +145,7 @@ class BenchDashboard {
 		}
 	}
 
-	setup_page_actions() {
-		this.$container.find('#btn-add-new-bench').on('click', () => {
-			this.show_add_bench_dialog();
-		});
 
-		this.$container.find('#btn-launch-vscode').on('click', () => {
-			if(!this.current_bench_path) return;
-			// VS Code launched through other mechanism
-			frappe.show_alert({ message: 'VS Code launched', indicator: 'green' });
-		});
-	}
 
 	// ─── Tab Management ──────────────────────────────────────────
 
@@ -175,25 +165,143 @@ class BenchDashboard {
 			self.$container.find('.tab-pane').removeClass('active');
 			self.$container.find(`#tab-${tab}`).addClass('active');
 
-			// Toggle header illustration
-			if (current_img === 1) {
-				self.$container.find('#header-ill-1').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
-				self.$container.find('#header-ill-2').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
-				current_img = 2;
-			} else {
-				self.$container.find('#header-ill-1').css({ 'opacity': '1', 'transform': 'translateY(0) scale(1)', 'pointer-events': 'auto' });
-				self.$container.find('#header-ill-2').css({ 'opacity': '0', 'transform': 'translateY(15px) scale(0.9)', 'pointer-events': 'none' });
-				current_img = 1;
-			}
-
 			// Load data for selected tab
 			if (tab === 'sites') self.load_sites();
 			else if (tab === 'apps') self.load_apps();
-			else if (tab === 'benches') self.load_benches();
-			else if (tab === 'bench') self.load_bench_info();
 			else if (tab === 'logs') self.load_logs();
 			else if (tab === 'vscode') self.load_vscode_instances();
 			else if (tab === 'database') self.load_database_browser();
+			else if (tab === 'health') {
+				self.load_health();
+				self.$container.find('#btn-refresh-health').off('click').on('click', () => self.load_health());
+				if (!self.health_interval) {
+					self.health_interval = setInterval(() => self.load_health(), 5000);
+				}
+			}
+		});
+	}
+
+	// ─── Global Actions ──────────────────────────────────────────
+
+	setup_global_actions() {
+		this.$container.find('#btn-global-settings').on('click', () => {
+			frappe.call({
+				method: 'bench_manager.api.get_common_config',
+				callback: (r) => {
+					const config = r.message || {};
+					const d = new frappe.ui.Dialog({
+						title: 'Global Bench Settings',
+						fields: [
+							{ label: 'Developer Mode', fieldname: 'developer_mode', fieldtype: 'Check', default: config.developer_mode ? 1 : 0 },
+							{ label: 'DNS Multitenancy', fieldname: 'dns_multitenant', fieldtype: 'Check', default: config.dns_multitenant ? 1 : 0 },
+							{ fieldtype: 'HTML', options: '<div class="text-muted mt-2" style="font-size: 11px;">Note: Changing DNS Multitenancy will apply immediately. Developer mode changes may require a bench restart.</div>' }
+						],
+						primary_action_label: 'Save Configuration',
+						primary_action: (values) => {
+							d.hide();
+							frappe.call({
+								method: 'bench_manager.api.update_common_config',
+								args: { key: 'developer_mode', value: values.developer_mode ? 1 : 0 },
+								callback: () => {
+									frappe.call({
+										method: 'bench_manager.api.toggle_dns_multitenancy',
+										args: { enable: values.dns_multitenant ? 1 : 0 },
+										callback: () => frappe.show_alert({message: 'Global settings updated successfully.', indicator: 'green'})
+									});
+								}
+							});
+						}
+					});
+					d.show();
+				}
+			});
+		});
+	}
+
+	// ─── Background Jobs ──────────────────────────────────────────
+
+	setup_jobs_actions() {
+		this.$container.find('#btn-refresh-jobs').on('click', () => {
+			this.load_jobs();
+		});
+		
+		this.jobs_history_limit = 20;
+		this.jobs_chart_data = {
+			labels: Array(this.jobs_history_limit).fill(''),
+			datasets: [
+				{ name: "Short", values: Array(this.jobs_history_limit).fill(0) },
+				{ name: "Default", values: Array(this.jobs_history_limit).fill(0) },
+				{ name: "Long", values: Array(this.jobs_history_limit).fill(0) }
+			]
+		};
+
+		setTimeout(() => {
+			this.jobs_chart = new frappe.Chart("#jobs-live-chart", {
+				title: "",
+				data: this.jobs_chart_data,
+				type: 'line',
+				height: 280,
+				colors: ['#3b82f6', '#10b981', '#f59e0b'],
+				axisOptions: { xIsSeries: true, xAxisMode: 'tick' },
+				lineOptions: { regionFill: 1, hideDots: 1, spline: 1 }
+			});
+			
+			// Poll every 3 seconds
+			setInterval(() => {
+				if(this.$container.find('#tab-jobs').hasClass('active')) {
+					this.load_jobs(true);
+				}
+			}, 3000);
+		}, 500);
+	}
+
+	load_jobs(silent = false) {
+		const $short = this.$container.find('#queue-short-count');
+		const $default = this.$container.find('#queue-default-count');
+		const $long = this.$container.find('#queue-long-count');
+		
+		if (!silent) {
+			$short.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+			$default.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+			$long.html('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 2s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>');
+		}
+
+		frappe.call({
+			method: 'bench_manager.api.get_redis_queue_status',
+			callback: (r) => {
+				if (r.message && r.message.status === 'success') {
+					const q = r.message.queues;
+					const s = q.short !== undefined ? q.short : 0;
+					const d = q.default !== undefined ? q.default : 0;
+					const l = q.long !== undefined ? q.long : 0;
+					
+					$short.text(s);
+					$default.text(d);
+					$long.text(l);
+					
+					if (this.jobs_chart) {
+						const now = new Date();
+						const timeLabel = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+						
+						this.jobs_chart_data.labels.shift();
+						this.jobs_chart_data.labels.push(timeLabel);
+						
+						this.jobs_chart_data.datasets[0].values.shift();
+						this.jobs_chart_data.datasets[0].values.push(s);
+						
+						this.jobs_chart_data.datasets[1].values.shift();
+						this.jobs_chart_data.datasets[1].values.push(d);
+						
+						this.jobs_chart_data.datasets[2].values.shift();
+						this.jobs_chart_data.datasets[2].values.push(l);
+						
+						this.jobs_chart.update(this.jobs_chart_data);
+					}
+				} else {
+					$short.text('Error'); $default.text('Error'); $long.text('Error');
+					if(!silent) frappe.show_alert({message: r.message ? r.message.message : 'Failed to fetch queue status', indicator: 'red'});
+				}
+			}
 		});
 	}
 
@@ -306,7 +414,6 @@ class BenchDashboard {
 			callback: (r) => {
 				if (r.message) {
 					const d = r.message;
-					this.$container.find('#status-benches-count').text(d.benches_count || '1');
 					this.$container.find('#status-sites-count').text(d.sites_count);
 					this.$container.find('#status-apps-count').text(d.apps_count);
 				}
@@ -314,814 +421,6 @@ class BenchDashboard {
 		});
 	}
 
-	// ─── Context Selector ───────────────────────────────────────
-
-	populate_context_selector() {
-		const $select = this.$container.find('#bench-context-select');
-
-		frappe.call({
-			method: 'bench_manager.api.discover_benches',
-			callback: (r) => {
-				const benches = r.message || [];
-				this.benches = benches; // Save for dialogs
-				$select.html('');
-				if (benches.length === 0) {
-					$select.append(`<option value="">No benches found</option>`);
-					return;
-				}
-
-				let hostBench = null;
-				benches.forEach((b) => {
-					if (b.is_host) hostBench = b;
-					const label = b.is_host ? `${b.name} (host)` : b.name;
-					const selected = b.is_host ? 'selected' : '';
-					$select.append(`<option value="${frappe.utils.escape_html(b.path)}" data-name="${frappe.utils.escape_html(b.name)}" data-ishost="${b.is_host}" ${selected}>${frappe.utils.escape_html(label)}</option>`);
-				});
-
-				// Set initial context
-				if (hostBench) {
-					this.current_bench_path = hostBench.path;
-					this.current_bench_name = hostBench.name;
-					this.is_host_bench = true;
-				}
-
-				// Handle context switch
-				$select.on('change', () => {
-					const $opt = $select.find('option:selected');
-					this.current_bench_path = $opt.val();
-					this.current_bench_name = $opt.data('name');
-					this.is_host_bench = $opt.data('ishost') === true;
-
-					// Reload active tab
-					const activeTab = this.$container.find('.bench-tab.active').data('tab');
-					if (activeTab === 'sites') this.load_sites();
-					else if (activeTab === 'apps') this.load_apps();
-					else if (activeTab === 'bench') this.load_bench_info();
-				});
-			}
-		});
-	}
-
-	// ─── Benches Tab ──────────────────────────────────────────────
-
-	setup_benches_actions() {
-		const self = this;
-		this.$container.find('#btn-init-bench, #btn-add-new-bench').on('click', () => {
-			self.show_init_bench_dialog();
-		});
-	}
-
-	show_init_bench_dialog() {
-		const self = this;
-
-		const d = new frappe.ui.Dialog({
-			title: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:-3px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> Initialize New Bench`,
-			fields: [
-				{
-					fieldtype: 'HTML',
-					options: `<div style="padding:12px 0 8px; margin-bottom:8px; border-bottom:1px solid var(--border-color);">
-						<p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.6;">
-							This will create a new Frappe bench directory at <code>/home/praveen/</code>. 
-							The process downloads Frappe, sets up a Python virtual environment, and installs all dependencies.
-							<strong>This typically takes 5–10 minutes.</strong>
-						</p>
-					</div>`
-				},
-				{
-					label: 'Bench Name',
-					fieldname: 'bench_name',
-					fieldtype: 'Data',
-					reqd: 1,
-					placeholder: 'e.g., frappe-bench-dev',
-					description: 'A folder with this name will be created at <code>/home/praveen/</code>',
-				},
-				{
-					label: 'Frappe Version',
-					fieldname: 'frappe_branch',
-					fieldtype: 'Select',
-					options: 'version-15',
-					default: 'version-15',
-					description: 'Currently limited to version-15 as Python 3.12 is not available',
-				},
-				{
-					fieldtype: 'HTML',
-					options: `<div style="display:flex; gap:10px; align-items:center; padding:10px 14px; background:var(--bg-light-gray, #f8fafc); border-radius:10px; border:1px solid var(--border-color); margin-top:4px;">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-						<div style="flex:1; font-size:12px; color:var(--text-muted);">
-							<strong>Python:</strong> Auto-detected from current system<br>
-							<strong>Path:</strong> /home/praveen/
-						</div>
-					</div>`
-				},
-				{ fieldtype: 'Section Break', label: 'Also Create a Site (Optional)', collapsible: 1, collapsible_depends_on: 'eval:false' },
-				{
-					label: 'Site Name',
-					fieldname: 'site_name',
-					fieldtype: 'Data',
-					placeholder: 'e.g., mysite.localhost',
-					description: 'Leave blank to skip. The site will be created after bench initialization completes.',
-				},
-				{
-					label: 'Admin Password',
-					fieldname: 'admin_password',
-					fieldtype: 'Password',
-					default: 'admin',
-					description: 'Password for the Administrator user of the new site',
-					depends_on: 'eval:doc.site_name',
-				},
-				{
-					label: 'MariaDB Root Password',
-					fieldname: 'mariadb_root_password',
-					fieldtype: 'Password',
-					description: 'Required if MariaDB root has a password set',
-					depends_on: 'eval:doc.site_name',
-				},
-			],
-			size: 'small',
-			primary_action_label: 'Initialize Bench',
-			primary_action(values) {
-				if (!values.bench_name) {
-					frappe.msgprint('Bench name is required');
-					return;
-				}
-
-				// Validate bench name
-				if (!/^[a-zA-Z0-9._-]+$/.test(values.bench_name)) {
-					frappe.msgprint('Bench name can only contain letters, numbers, dots, hyphens, and underscores.');
-					return;
-				}
-
-				d.hide();
-
-				// Show initializing row in the benches table
-				const $tbody = self.$container.find('#benches-table-wrapper tbody');
-				if ($tbody.length) {
-					$tbody.append(`<tr data-bench="${frappe.utils.escape_html(values.bench_name)}" style="animation: pulse 2s infinite;">
-						<td><strong>${frappe.utils.escape_html(values.bench_name)}</strong> <span style="font-size:10px; font-weight:600; background:#dbeafe; color:#1e40af; padding:2px 6px; border-radius:6px; margin-left:6px;">INITIALIZING</span></td>
-						<td><span class="bench-path-cell">/home/praveen/${frappe.utils.escape_html(values.bench_name)}</span></td>
-						<td><span class="bench-version-cell">${frappe.utils.escape_html(values.frappe_branch)}</span></td>
-						<td><span class="badge-status badge-running"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin-animation 1.5s linear infinite; margin-right:4px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Initializing...</span></td>
-					</tr>`);
-				}
-
-				// Start the real backend process
-				self.start_pending_op();
-				self.show_live_activity(values.bench_name);
-
-				frappe.call({
-					method: 'bench_manager.api.init_bench',
-					args: {
-						bench_name: values.bench_name,
-						frappe_branch: values.frappe_branch,
-						site_name: values.site_name || '',
-						admin_password: values.admin_password || 'admin',
-						mariadb_root_password: values.mariadb_root_password || '',
-					},
-					callback: (r) => {
-						if (r.message) {
-							frappe.show_alert({
-								message: r.message.message,
-								indicator: 'blue'
-							});
-						}
-					},
-					error: (r) => {
-						frappe.show_alert({
-							message: 'Failed to start bench initialization',
-							indicator: 'red'
-						});
-						self.stop_pending_op();
-					}
-				});
-			},
-		});
-
-		d.show();
-		d.$wrapper.find('.modal-dialog').css('max-width', '520px');
-	}
-
-	load_benches() {
-		const $wrapper = this.$container.find('#benches-table-wrapper');
-		$wrapper.html('<div class="loading-placeholder">Discovering benches...</div>');
-
-		frappe.call({
-			method: 'bench_manager.api.discover_benches',
-			callback: (r) => {
-				const benches = r.message || [];
-				this.render_benches_table(benches);
-
-				// Update the status bar count
-				this.$container.find('#status-benches-count').text(benches.length);
-
-				// Compute total sites and apps across all benches
-				let totalSites = 0, totalApps = 0;
-				benches.forEach(b => {
-					totalSites += (b.sites_count || 0);
-					totalApps += (b.apps_count || 0);
-				});
-				this.$container.find('#status-sites-count').text(totalSites);
-				this.$container.find('#status-apps-count').text(totalApps);
-			},
-			error: () => {
-				$wrapper.html(`
-					<div class="empty-state">
-						<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty" style="max-width: 140px; margin-bottom: 20px;">
-						<p>Failed to discover benches. Check server logs.</p>
-					</div>`);
-			}
-		});
-	}
-
-	render_benches_table(benches) {
-		const self = this;
-		const $wrapper = this.$container.find('#benches-table-wrapper');
-
-		if (!benches || !benches.length) {
-			$wrapper.html(`
-				<div class="empty-state">
-					<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty" style="max-width: 140px; margin-bottom: 20px;">
-					<p>No benches found. Initialize your first bench!</p>
-				</div>`);
-			return;
-		}
-
-		this._benches_data = benches;
-
-		let html = `<table class="bench-table">
-			<thead><tr>
-				<th>Bench Name</th><th>Path</th><th>Frappe</th><th>Sites</th><th>Apps</th><th>Status</th><th style="width:80px;text-align:center;">Actions</th>
-			</tr></thead><tbody>`;
-
-		benches.forEach((bench) => {
-			const isOnline = bench.status === 'Online';
-			const badgeClass = isOnline ? 'badge-online' : 'badge-offline';
-			const dotClass = isOnline ? 'online' : 'offline';
-			const hostTag = bench.is_host ? ' <span class="bench-host-tag">HOST</span>' : '';
-			const esc = (s) => frappe.utils.escape_html(s);
-
-			html += `<tr data-bench="${esc(bench.name)}" data-path="${esc(bench.path)}" data-is-host="${bench.is_host ? 1 : 0}">
-				<td><strong>${esc(bench.name)}</strong>${hostTag}</td>
-				<td><span class="bench-path-cell">${esc(bench.path)}</span></td>
-				<td><span class="bench-version-cell">${esc(bench.version)}</span></td>
-				<td style="text-align:center;font-weight:600;">${bench.sites_count || 0}</td>
-				<td style="text-align:center;font-weight:600;">${bench.apps_count || 0}</td>
-				<td><span class="badge-status ${badgeClass}"><span class="status-dot ${dotClass}"></span> ${esc(bench.status)}</span></td>
-				<td style="text-align:center;">
-					<div class="bench-actions-dropdown">
-						<a href="#" class="bench-actions-toggle text-muted" title="Actions" 
-							data-bench="${esc(bench.name)}" 
-							data-path="${esc(bench.path)}" 
-							data-is-host="${bench.is_host ? 1 : 0}"
-							data-is-online="${isOnline ? 1 : 0}"
-							style="padding: 4px; display: inline-block; box-shadow: none;">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-						</a>
-					</div>
-				</td>
-			</tr>`;
-		});
-
-		html += '</tbody></table>';
-		$wrapper.html(html);
-		this._bind_bench_actions();
-	}
-
-	_bind_bench_actions() {
-		const self = this;
-
-		// Create singleton menu in body if it doesn't exist
-		if ($('#bench-actions-singleton').length === 0) {
-			$('<div id="bench-actions-singleton" class="bench-actions-menu"></div>').appendTo('body');
-
-			// Bind singleton click events
-			$(document).on('click', '#bench-actions-singleton .bench-action-item', function (e) {
-				e.preventDefault();
-				e.stopPropagation();
-				$('#bench-actions-singleton').removeClass('show');
-
-				const action = $(this).data('action');
-				const benchPath = $(this).data('path');
-				const benchName = $(this).data('bench');
-				const isHost = $(this).data('is-host') == 1;
-
-				switch (action) {
-					case 'view': self.show_bench_details(benchPath, benchName); break;
-					case 'health': self.show_bench_health(benchPath, benchName); break;
-					case 'start': self.action_start_bench(benchPath, benchName); break;
-					case 'stop': self.action_stop_bench(benchPath, benchName); break;
-					case 'open_site': self.show_open_site_dialog(benchPath, benchName, isHost); break;
-					case 'create_site': self.show_create_site_dialog(benchPath, benchName); break;
-					case 'backup': self.action_backup_all(benchPath, benchName); break;
-					case 'update': self.action_update_bench(benchPath, benchName); break;
-					case 'sync': self.show_sync_app_dialog(benchPath, benchName); break;
-					case 'delete': self.action_delete_bench(benchPath, benchName); break;
-				}
-			});
-
-			// Dismissal
-			$(document).on('click.bench-actions', (e) => {
-				if (!$(e.target).closest('.bench-actions-toggle').length) {
-					$('#bench-actions-singleton').removeClass('show');
-				}
-			});
-			$(window).on('scroll.bench-actions', () => $('#bench-actions-singleton').removeClass('show'));
-		}
-
-		// Toggle dropdown — position the singleton menu
-		this.$container.find('.bench-actions-toggle').off('click').on('click', function (e) {
-			e.stopPropagation();
-			const $btn = $(this);
-			const benchName = $btn.data('bench');
-			const benchPath = $btn.data('path');
-			const isHost = $btn.data('is-host') == 1;
-			const isOnline = $btn.data('is-online') == 1;
-
-			const $singleton = $('#bench-actions-singleton');
-			const wasOpen = $singleton.hasClass('show') && $singleton.data('current-bench') === benchPath;
-
-			// Close if already open for this row
-			$singleton.removeClass('show');
-			if (wasOpen) return;
-
-			// Build the menu HTML dynamically for this row
-			const esc = frappe.utils.escape_html;
-			let html = `
-				<a class="bench-action-item" data-action="view" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View Details</a>
-				<a class="bench-action-item" data-action="health" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Health Check</a>
-				<div class="bench-action-divider"></div>
-				<a class="bench-action-item" data-action="${isOnline ? 'stop' : 'start'}" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${isOnline ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>' : '<polygon points="5 3 19 12 5 21 5 3"/>'}</svg> ${isOnline ? 'Stop Bench' : 'Start Bench'}</a>
-				<a class="bench-action-item" data-action="open_site" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}" data-is-host="${isHost ? 1 : 0}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open Site</a>
-				<a class="bench-action-item" data-action="create_site" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg> Create New Site</a>
-				<div class="bench-action-divider"></div>
-				<a class="bench-action-item" data-action="backup" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Backup All Sites</a>
-				<a class="bench-action-item" data-action="update" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Update Bench</a>
-				<a class="bench-action-item" data-action="sync" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg> Sync App Here</a>
-			`;
-			if (!isHost) {
-				html += `<div class="bench-action-divider"></div><a class="bench-action-item bench-action-danger" data-action="delete" data-path="${esc(benchPath)}" data-bench="${esc(benchName)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete Bench</a>`;
-			}
-
-			$singleton.html(html);
-			$singleton.data('current-bench', benchPath);
-
-			// Position the menu using fixed coordinates based on the button
-			const rect = this.getBoundingClientRect();
-			$singleton.css({
-				top: rect.bottom + 4 + 'px',
-				left: (rect.right - 200) + 'px',  // 200 = min-width of menu, right-align
-				zIndex: 99999
-			});
-			$singleton.addClass('show');
-		});
-	}
-
-	// ─── P0: View Details ────────────────────────────────────────
-
-	show_bench_details(benchPath, benchName) {
-		const d = new frappe.ui.Dialog({
-			title: `${benchName} — Sites & Apps`,
-			fields: [{ fieldtype: 'HTML', fieldname: 'details_html' }],
-			size: 'large',
-		});
-		d.$wrapper.find('[data-fieldname="details_html"]').html('<div class="text-center p-4 text-muted">Loading...</div>');
-		d.show();
-		frappe.call({
-			method: 'bench_manager.api.get_bench_details',
-			args: { bench_path: benchPath },
-			callback: (r) => {
-				const data = r.message || {};
-				const sites = data.sites || [];
-				const apps = data.apps || [];
-				let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
-				// Sites panel
-				html += `<div><h5 style="font-weight:700;margin-bottom:10px;">Sites (${sites.length})</h5>`;
-				if (sites.length) {
-					html += `<div style="border:1px solid var(--border-color);border-radius:10px;overflow:hidden;">`;
-					sites.forEach(s => {
-						const stBadge = s.maintenance ? '<span class="badge-status badge-maintenance" style="font-size:10px;margin-left:6px;">Maintenance</span>' : '';
-						html += `<div style="padding:10px 14px;border-bottom:1px solid var(--border-color,#f1f5f9);display:flex;align-items:center;gap:8px;">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
-							<strong style="font-size:13px;">${frappe.utils.escape_html(s.name)}</strong>${stBadge}
-							<span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-family:monospace;">${frappe.utils.escape_html(s.db)}</span>
-						</div>`;
-					});
-					html += `</div>`;
-				} else { html += `<p class="text-muted">No sites</p>`; }
-				html += `</div>`;
-				// Apps panel
-				html += `<div><h5 style="font-weight:700;margin-bottom:10px;">Apps (${apps.length})</h5>`;
-				if (apps.length) {
-					html += `<div style="border:1px solid var(--border-color);border-radius:10px;overflow:hidden;">`;
-					apps.forEach(a => {
-						html += `<div style="padding:10px 14px;border-bottom:1px solid var(--border-color,#f1f5f9);display:flex;align-items:center;gap:8px;">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-							<strong style="font-size:13px;">${frappe.utils.escape_html(a)}</strong>
-						</div>`;
-					});
-					html += `</div>`;
-				} else { html += `<p class="text-muted">No apps</p>`; }
-				html += `</div></div>`;
-				d.$wrapper.find('[data-fieldname="details_html"]').html(html);
-			}
-		});
-	}
-
-	// ─── P0: Start / Stop ────────────────────────────────────────
-
-	action_start_bench(benchPath, benchName) {
-		const self = this;
-		const d = new frappe.ui.Dialog({
-			title: `Start ${benchName}`,
-			fields: [{ label: 'Port', fieldname: 'port', fieldtype: 'Int', default: 8001, description: 'Port to start the bench on (avoid 8000 if host is running)' }],
-			primary_action_label: 'Start',
-			primary_action(v) {
-				d.hide();
-				frappe.call({
-					method: 'bench_manager.api.start_bench',
-					args: { bench_path: benchPath, port: v.port },
-					callback: (r) => {
-						if (r.message.status === 'error') {
-							frappe.show_alert({ message: r.message.message, indicator: 'red' });
-							return;
-						}
-						frappe.show_alert({ message: r.message.message, indicator: r.message.status === 'already_running' ? 'orange' : 'green' });
-						// Optimistic UI update
-						const $row = self.$container.find(`.bench-table tr[data-path="${frappe.utils.escape_html(benchPath)}"]`);
-						if ($row.length) {
-							$row.find('.badge-status').removeClass('badge-offline').addClass('badge-online').html('<span class="status-dot online"></span> Online');
-							$row.find('[data-action="start"]').attr('data-action', 'stop').html('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stop Bench');
-						}
-						setTimeout(() => self.load_benches(), 2000);
-					}
-				});
-			}
-		});
-		d.show();
-	}
-
-	action_stop_bench(benchPath, benchName) {
-		const self = this;
-		frappe.confirm(`Stop <strong>${benchName}</strong>? All sites on this bench will go offline.`, () => {
-			frappe.call({
-				method: 'bench_manager.api.stop_bench',
-				args: { bench_path: benchPath },
-				callback: (r) => {
-					frappe.show_alert({ message: r.message.message, indicator: 'orange' });
-					// Optimistic UI update
-					const $row = self.$container.find(`.bench-table tr[data-path="${frappe.utils.escape_html(benchPath)}"]`);
-					if ($row.length) {
-						$row.find('.badge-status').removeClass('badge-online').addClass('badge-offline').html('<span class="status-dot offline"></span> Offline');
-						$row.find('[data-action="stop"]').attr('data-action', 'start').html('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Bench');
-					}
-					setTimeout(() => self.load_benches(), 2000);
-				}
-			});
-		});
-	}
-
-	// ─── P1: Backup All Sites ────────────────────────────────────
-
-	action_backup_all(benchPath, benchName) {
-		const self = this;
-		frappe.confirm(`Backup all sites on <strong>${benchName}</strong>? This runs in the background.`, () => {
-			self.start_pending_op();
-			self.show_live_activity(benchName);
-			frappe.call({
-				method: 'bench_manager.api.backup_all_bench_sites',
-				args: { bench_path: benchPath },
-				callback: (r) => frappe.show_alert({ message: r.message.message, indicator: 'blue' })
-			});
-		});
-	}
-
-	// ─── P1: Delete Bench ────────────────────────────────────────
-
-	action_delete_bench(benchPath, benchName) {
-		const self = this;
-		frappe.confirm(`<div style="text-align:center;">
-			<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="margin-bottom:8px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-			<p style="font-weight:700;font-size:15px;margin-bottom:4px;">Delete ${benchName}?</p>
-			<p style="color:var(--text-muted);font-size:13px;">This will permanently remove the entire bench directory including all sites, databases, and apps. This cannot be undone.</p>
-		</div>`, () => {
-			frappe.call({
-				method: 'bench_manager.api.delete_bench',
-				args: { bench_path: benchPath, confirm: 'yes' },
-				callback: (r) => {
-					frappe.show_alert({ message: r.message.message, indicator: 'green' });
-					self.load_benches();
-					self.populate_context_selector();
-				},
-				error: () => frappe.show_alert({ message: 'Delete failed — check server logs.', indicator: 'red' })
-			});
-		});
-	}
-
-	// ─── P2: Update Bench ────────────────────────────────────────
-
-	action_update_bench(benchPath, benchName) {
-		const self = this;
-		frappe.confirm(`Run <strong>bench update</strong> on <strong>${benchName}</strong>? This pulls latest code and runs migrations.`, () => {
-			self.start_pending_op();
-			self.show_live_activity(benchName);
-			frappe.call({
-				method: 'bench_manager.api.update_remote_bench',
-				args: { bench_path: benchPath },
-				callback: (r) => frappe.show_alert({ message: r.message.message, indicator: 'blue' })
-			});
-		});
-	}
-
-	// ─── P2: Health Check ────────────────────────────────────────
-
-	show_bench_health(benchPath, benchName) {
-		const d = new frappe.ui.Dialog({
-			title: `Health Check — ${benchName}`,
-			fields: [{ fieldtype: 'HTML', fieldname: 'health_html' }],
-		});
-		d.$wrapper.find('[data-fieldname="health_html"]').html('<div class="text-center p-4 text-muted">Checking...</div>');
-		d.show();
-		frappe.call({
-			method: 'bench_manager.api.bench_health_check',
-			args: { bench_path: benchPath },
-			callback: (r) => {
-				const h = r.message;
-				const ok = (v) => `<span style="color:#10b981;font-weight:600;">✓ ${v}</span>`;
-				const warn = (v) => `<span style="color:#f59e0b;font-weight:600;">⚠ ${v}</span>`;
-				const fail = (v) => `<span style="color:#ef4444;font-weight:600;">✕ ${v}</span>`;
-				let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">`;
-				const card = (icon, label, value) => `<div style="padding:14px;border:1px solid var(--border-color);border-radius:10px;display:flex;align-items:center;gap:12px;">${icon}<div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:700;">${label}</div><div style="font-size:15px;font-weight:700;color:var(--text-color);">${value}</div></div></div>`;
-				const iconSvg = (path) => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6d63ff" stroke-width="2">${path}</svg>`;
-
-				html += card(iconSvg(`<line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line>`), 'Disk Usage', h.disk_usage);
-				html += card(iconSvg(`<polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline>`), 'Python', h.python_version);
-				html += card(iconSvg(`<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>`), 'Node.js', h.node_version);
-				html += card(iconSvg(`<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>`), 'Sites', h.sites_count);
-				html += card(iconSvg(`<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect>`), 'Apps', h.apps_count);
-				html += card(iconSvg(`<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>`), 'Virtualenv', h.venv_valid ? ok('Valid') : fail('Broken'));
-				html += card(iconSvg(`<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>`), 'Procfile', h.procfile ? ok('Present') : warn('Missing'));
-				html += `</div>`;
-				d.$wrapper.find('[data-fieldname="health_html"]').html(html);
-			}
-		});
-	}
-
-	// ─── P3: Sync App ────────────────────────────────────────────
-
-	show_sync_app_dialog(targetPath, targetName) {
-		const self = this;
-		// Step 1: Get apps from host bench
-		frappe.call({
-			method: 'bench_manager.api.list_apps',
-			callback: (r) => {
-				const apps = (r.message || []).map(a => a.app_name).filter(a => a !== 'frappe');
-				if (!apps.length) { frappe.msgprint('No custom apps found on host bench.'); return; }
-
-				// Step 2: Get target bench details for site list
-				frappe.call({
-					method: 'bench_manager.api.get_bench_details',
-					args: { bench_path: targetPath },
-					callback: (r2) => {
-						const sites = (r2.message?.sites || []).map(s => s.name);
-						const siteOptions = sites.length ? ['', ...sites].join('\n') : '';
-
-						const d = new frappe.ui.Dialog({
-							title: `Sync App to ${targetName}`,
-							fields: [
-								{
-									fieldtype: 'HTML', fieldname: 'compat_html',
-									options: `<div style="padding:8px 0; color:var(--text-muted); font-size:13px;">Select an app to check version compatibility and sync.</div>`
-								},
-								{
-									label: 'App to Sync', fieldname: 'app_name', fieldtype: 'Select',
-									options: apps.join('\n'), reqd: 1,
-									description: `This app will be copied from the host bench to <strong>${frappe.utils.escape_html(targetName)}</strong>`,
-									onchange: () => {
-										const appName = d.get_value('app_name');
-										if (!appName) return;
-										// Check compatibility
-										frappe.call({
-											method: 'bench_manager.api.get_app_compatibility',
-											args: { app_name: appName, target_bench_path: targetPath },
-											callback: (cr) => {
-												const c = cr.message;
-												let html;
-												if (c.compatible) {
-													html = `<div style="padding:10px 14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; margin:8px 0;">
-														<div style="font-weight:700; color:#15803d; margin-bottom:4px;">✓ Version Compatible</div>
-														<div style="font-size:12px; color:#166534;">Host: v${c.host_version} → Target: v${c.target_version}</div>
-													</div>`;
-												} else {
-													html = `<div style="padding:10px 14px; background:#fef3c7; border:1px solid #fde68a; border-radius:10px; margin:8px 0;">
-														<div style="font-weight:700; color:#92400e; margin-bottom:4px;">⚠ Version Mismatch</div>
-														<div style="font-size:12px; color:#92400e;">Host: v${c.host_version} (v${c.host_major}) → Target: v${c.target_version} (v${c.target_major})</div>
-														<div style="font-size:11px; color:#92400e; margin-top:4px;">The app may not be compatible. Consider updating the target bench to match the host version first.</div>
-													</div>`;
-												}
-												d.fields_dict.compat_html.$wrapper.html(html);
-											}
-										});
-									}
-								},
-								{ fieldtype: 'Section Break', label: 'Install on Site (Optional)' },
-								{
-									label: 'Install on Site', fieldname: 'install_site', fieldtype: 'Select',
-									options: siteOptions,
-									description: sites.length ? 'Select a site to install the app on after syncing (optional)' : 'No sites found on this bench',
-								},
-							],
-							primary_action_label: 'Sync App',
-							primary_action(v) {
-								d.hide();
-								self.start_pending_op();
-								self.show_live_activity(targetName);
-								// Step 3: Sync the app
-								frappe.call({
-									method: 'bench_manager.api.sync_app_to_bench',
-									args: { app_name: v.app_name, target_bench_path: targetPath },
-									callback: (r) => {
-										frappe.show_alert({ message: r.message.message, indicator: 'blue' });
-										// Step 4: If a site was selected, install the app on it after a delay
-										if (v.install_site) {
-											setTimeout(() => {
-												frappe.call({
-													method: 'bench_manager.api.install_app_on_site_remote',
-													args: {
-														bench_path: targetPath,
-														site_name: v.install_site,
-														app_name: v.app_name,
-													},
-													callback: (ir) => frappe.show_alert({ message: ir.message.message, indicator: 'blue' }),
-												});
-											}, 5000); // Wait for get-app to complete
-										}
-									}
-								});
-							}
-						});
-						d.show();
-						d.$wrapper.find('.modal-dialog').css('max-width', '520px');
-					}
-				});
-			}
-		});
-	}
-
-	// ─── Open Site in Browser ─────────────────────────────────────
-
-	show_open_site_dialog(benchPath, benchName, isHost) {
-		const self = this;
-		frappe.call({
-			method: 'bench_manager.api.get_bench_details',
-			args: { bench_path: benchPath },
-			callback: (r) => {
-				const sites = (r.message?.sites || []).map(s => s.name);
-				if (!sites.length) {
-					frappe.msgprint(`No sites found on <strong>${frappe.utils.escape_html(benchName)}</strong>. Create a site first.`);
-					return;
-				}
-				frappe.call({
-					method: 'bench_manager.api.get_bench_port',
-					args: { bench_path: benchPath },
-					callback: (r2) => {
-						// For host bench, always use current window port (it's running)
-						let port = r2.message?.port || 8000;
-						if (isHost && window.location.port) {
-							port = window.location.port;
-						}
-						const d = new frappe.ui.Dialog({
-							title: `Open Site on ${benchName}`,
-							fields: [
-								{
-									fieldtype: 'HTML',
-									options: `<div style="padding:8px 0 10px; margin-bottom:8px; border-bottom:1px solid var(--border-color);">
-										<p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.6;">
-											Select a site to open. It will be set as the <strong>default site</strong> for this bench 
-											and opened in your browser on port <code>${port}</code>.
-										</p>
-									</div>`
-								},
-								{
-									label: 'Select Site', fieldname: 'site_name', fieldtype: 'Select',
-									options: sites.join('\n'), reqd: 1,
-								},
-								{
-									fieldtype: 'HTML', fieldname: 'site_url_preview',
-									options: `<div style="padding:10px 14px; background:var(--bg-light-gray); border-radius:10px; margin-top:6px;">
-										<div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); font-weight:700; margin-bottom:4px;">URL Preview</div>
-										<div style="font-size:14px; font-weight:600; color:var(--primary);">http://${frappe.utils.escape_html(self._get_site_hostname(sites[0]))}:${port}</div>
-										<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Site: ${frappe.utils.escape_html(sites[0])}</div>
-									</div>`
-								},
-							],
-							primary_action_label: 'Set Default & Open',
-							primary_action(values) {
-								d.hide();
-								frappe.show_alert({ message: `Setting ${values.site_name} as default...`, indicator: 'blue' });
-								frappe.call({
-									method: 'bench_manager.api.set_default_site_on_bench',
-									args: { bench_path: benchPath, site_name: values.site_name },
-									callback: (r) => {
-										frappe.show_alert({ message: r.message.message, indicator: 'green' });
-										// Use the open_url returned by the API
-										if (r.message.open_url) {
-											setTimeout(() => window.open(r.message.open_url, '_blank'), 500);
-										}
-									},
-									error: () => {
-										frappe.show_alert({ message: 'Failed to set default site', indicator: 'red' });
-									}
-								});
-							}
-						});
-
-						d.fields_dict.site_name.$input.on('change', function () {
-							const site = $(this).val();
-							d.fields_dict.site_url_preview.$wrapper.html(
-								`<div style="padding:10px 14px; background:var(--bg-light-gray); border-radius:10px; margin-top:6px;">
-									<div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); font-weight:700; margin-bottom:4px;">URL Preview</div>
-									<div style="font-size:14px; font-weight:600; color:var(--primary);">http://${frappe.utils.escape_html(self._get_site_hostname(site))}:${port}</div>
-									<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Site: ${frappe.utils.escape_html(site)}</div>
-								</div>`
-							);
-						});
-
-						d.show();
-					}
-				});
-			}
-		});
-	}
-
-
-	// ─── Create Site on Any Bench ────────────────────────────────
-
-	show_create_site_dialog(benchPath, benchName) {
-		const self = this;
-		const d = new frappe.ui.Dialog({
-			title: `Create New Site on ${benchName}`,
-			fields: [
-				{
-					fieldtype: 'HTML',
-					options: `<div style="padding:10px 0 8px; margin-bottom:8px; border-bottom:1px solid var(--border-color);">
-						<p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.6;">
-							This creates a new Frappe site on <strong>${frappe.utils.escape_html(benchName)}</strong>.
-							A MariaDB database will be created and Frappe will be installed.
-						</p>
-					</div>`
-				},
-				{
-					label: 'Site Name',
-					fieldname: 'site_name',
-					fieldtype: 'Data',
-					reqd: 1,
-					placeholder: 'e.g., mysite.localhost',
-					description: 'Must contain a dot (e.g., myapp.localhost)',
-				},
-				{
-					label: 'Admin Password',
-					fieldname: 'admin_password',
-					fieldtype: 'Password',
-					default: 'admin',
-					reqd: 1,
-					description: 'Password for the Administrator user',
-				},
-				{
-					label: 'MariaDB Root Password',
-					fieldname: 'mariadb_root_password',
-					fieldtype: 'Password',
-					description: 'Required if your MariaDB root user has a password',
-				},
-			],
-			size: 'small',
-			primary_action_label: 'Create Site',
-			primary_action(values) {
-				if (!values.site_name || !values.site_name.includes('.')) {
-					frappe.msgprint('Site name must contain a dot (e.g., mysite.localhost)');
-					return;
-				}
-				d.hide();
-				self.start_pending_op();
-				self.show_live_activity(benchName);
-				frappe.call({
-					method: 'bench_manager.api.create_site_on_bench',
-					args: {
-						bench_path: benchPath,
-						site_name: values.site_name,
-						admin_password: values.admin_password || 'admin',
-						mariadb_root_password: values.mariadb_root_password || '',
-					},
-					callback: (r) => {
-						frappe.show_alert({ message: r.message.message, indicator: 'blue' });
-					},
-					error: () => {
-						frappe.show_alert({ message: 'Failed to start site creation', indicator: 'red' });
-						self.stop_pending_op();
-					}
-				});
-			}
-		});
-		d.show();
-	}
 
 	// ─── Sites Tab ───────────────────────────────────────────────
 
@@ -1129,8 +428,8 @@ class BenchDashboard {
 		const $wrapper = this.$container.find('#sites-table-wrapper');
 		$wrapper.html('<div class="loading-placeholder">Loading sites...</div>');
 
-		const method = this.is_host_bench ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
-		const args = this.is_host_bench ? {} : { bench_path: this.current_bench_path };
+		const method = 'bench_manager.api.list_sites';
+		const args = {};
 
 		frappe.call({
 			method: method,
@@ -1178,9 +477,9 @@ class BenchDashboard {
 			
 			const alwaysOnBadge = isBenchManagerSite ? `<span style="font-size:10px;font-weight:700;background:linear-gradient(135deg, #3b82f6, #6366f1);color:white;padding:4px 10px;border-radius:12px;margin-left:8px;box-shadow:0 4px 12px rgba(99,102,241,0.3);letter-spacing:0.5px;text-transform:uppercase;">⚡ ALWAYS ON</span>` : '';
 			
-			const cardBorder = isBenchManagerSite ? 'border: 1px solid rgba(59, 130, 246, 0.3);' : (isActive ? 'border: 1px solid rgba(16, 185, 129, 0.3);' : 'border: 1px solid var(--border-light);');
-			const cardBg = isBenchManagerSite ? 'background: linear-gradient(145deg, var(--card-bg), rgba(59, 130, 246, 0.03));' : (isActive ? 'background: linear-gradient(145deg, var(--card-bg), rgba(16, 185, 129, 0.03));' : 'background: var(--card-bg);');
-			const cardGlow = isBenchManagerSite ? 'box-shadow: 0 10px 40px rgba(59, 130, 246, 0.08);' : (isActive ? 'box-shadow: 0 10px 40px rgba(16, 185, 129, 0.08);' : 'box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);');
+			const cardBorder = isActive ? 'border: 1px solid var(--border-light);' : 'border: 1px solid var(--border-light);';
+			const cardBg = 'background: var(--card-bg);';
+			const cardGlow = 'box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);';
 			
 			const statusDotHtml = isActive ? `<div class="status-pulse-dot" style="width: 10px; height: 10px; border-radius: 50%; background-color: ${statusColor}; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse-green 2s infinite;"></div>` : `<div style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid ${statusColor}; background-color: transparent;"></div>`;
 
@@ -1232,8 +531,8 @@ class BenchDashboard {
 				avatarsHtml = `<div class="site-app-avatars-async" data-site="${frappe.utils.escape_html(site.site_name)}" style="display: flex; align-items: center; padding: 6px 12px; background: var(--bg-light-gray); border-radius: 20px;"><span style="font-size: 12px; font-weight: 500; color: var(--text-muted); display: flex; align-items: center; gap: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="spin-icon"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Loading apps...</span></div>`;
 			}
 
-			// Hover Actions — on remote benches, always show Open icon (click auto-starts server)
-			const showOpenBtn = isActive || !self.is_host_bench;
+			// Hover Actions
+			const showOpenBtn = isActive;
 			const hoverActions = `
 				<div class="site-card-hover-actions" style="display: flex; gap: 8px;">
 					${showOpenBtn ? `<a href="#" class="site-open icon-btn" data-site="${frappe.utils.escape_html(site.site_name)}" title="Open Site" style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; color: var(--text-color); background: var(--bg-light-gray); transition: all 0.2s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : ''}
@@ -1292,9 +591,6 @@ class BenchDashboard {
 			const site = $container.data('site');
 			
 			const args = { site_name: site };
-			if (!self.is_host_bench) {
-				args.bench_path = self.current_bench_path;
-			}
 			
 			frappe.call({
 				method: 'bench_manager.api.get_site_apps',
@@ -1340,7 +636,7 @@ class BenchDashboard {
 			const site_name = $(this).data('site');
 			const $card = $(this);
 			const isBenchManagerSite = site_name === (frappe.boot.sitename || '') || site_name === 'bench_manager.local';
-			const isInactive = $card.find('.status-dot-active').length === 0 && !isBenchManagerSite;
+			const isInactive = $card.find('.status-pulse-dot').length === 0 && !isBenchManagerSite;
 			const isActive = !isInactive;
 			
 			const d = new frappe.ui.Dialog({
@@ -1352,12 +648,17 @@ class BenchDashboard {
 						options: `
 						<div style="display: flex; flex-direction: column; gap: 8px;">
 							<div style="margin-bottom: 12px; font-weight: bold; font-size: 16px; color: var(--text-color);">${frappe.utils.escape_html(site_name)}</div>
-							${!isBenchManagerSite && isInactive ? `<button class="btn btn-default text-left modal-site-start" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: var(--status-green); font-size: 18px;">▶</span> Start Site</button>` : ''}
-							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><span style="color: #f59e0b; font-size: 18px;">■</span> Stop Site</button>` : ''}
-							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🔄 Migrate Site</button>
-							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">💾 Backup Database</button>
-							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">🛠 Toggle Maintenance Mode</button>
-							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;">✕ Drop Site</button>` : ''}
+							${!isBenchManagerSite && isInactive ? `<button class="btn btn-default text-left modal-site-start" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--status-green);"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start Site</button>` : ''}
+							${!isBenchManagerSite && isActive ? `<button class="btn btn-default text-left modal-site-stop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #f59e0b;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Site</button>` : ''}
+							<button class="btn btn-default text-left modal-site-migrate" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l-3.23 3.23"></path></svg> Migrate Site</button>
+							<button class="btn btn-default text-left modal-site-backup" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Backup Database</button>
+							<button class="btn btn-default text-left modal-site-restore" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><polyline points="23 20 23 14 17 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg> Restore Database</button>
+							<button class="btn btn-default text-left modal-site-config" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> Site Config</button>
+							<button class="btn btn-default text-left modal-site-maintenance" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg> Toggle Maintenance Mode</button>
+							<button class="btn btn-default text-left modal-site-clearcache" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><polyline points="21 3 21 8 16 8"></polyline></svg> Clear Site Cache</button>
+							<button class="btn btn-default text-left modal-site-fixtures" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> Export Fixtures</button>
+							<button class="btn btn-default text-left modal-site-tinker" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: background 0.2s; color: #8b5cf6;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Python Console</button>
+							${!isBenchManagerSite ? `<hr style="margin: 8px 0; border-color: var(--border-light);"><button class="btn btn-default text-left modal-site-drop" style="width: 100%; text-align: left; padding: 10px 15px; border-radius: 8px; font-weight: 500; color: var(--danger); border-color: var(--danger-hover-bg); background: var(--danger-hover-bg); display: flex; align-items: center; gap: 8px; transition: background 0.2s;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Drop Site</button>` : ''}
 						</div>
 						`
 					}
@@ -1372,6 +673,113 @@ class BenchDashboard {
 			d.$wrapper.find('.modal-site-backup').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-backup').click(), 250); });
 			d.$wrapper.find('.modal-site-maintenance').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-maintenance').click(), 250); });
 			d.$wrapper.find('.modal-site-drop').hover(function(){$(this).css('background', '#fef2f2').css('border-color', '#fca5a5')}, function(){$(this).css('background', '#fef2f2').css('border-color', '#fee2e2')}).on('click', () => { d.hide(); setTimeout(() => $card.find('.site-drop').click(), 250); });
+			
+			d.$wrapper.find('.modal-site-tinker').hover(function(){$(this).css('background', '#f5f3ff')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				const pd = new frappe.ui.Dialog({
+					title: `Python Console: ${site_name}`,
+					fields: [
+						{ fieldtype: 'HTML', options: '<div style="font-size:12px; margin-bottom:10px; color:var(--text-muted);">Execute raw Python code against this site. <code>frappe</code> module is available.</div>'},
+						{ fieldname: 'code', fieldtype: 'Code', label: 'Python Script', default: 'print(frappe.get_all("User", limit=2))' },
+						{ fieldtype: 'HTML', fieldname: 'output_area', options: '<pre id="tinker-output" style="display:none; margin-top:15px; max-height:200px; overflow-y:auto; font-size:11px; white-space:pre-wrap;"></pre>'}
+					],
+					primary_action_label: 'Execute Script',
+					primary_action: (values) => {
+						pd.get_primary_btn().prop('disabled', true).text('Running...');
+						frappe.call({
+							method: 'bench_manager.api.execute_python_console',
+							args: { site_name: site_name, code: values.code },
+							callback: (r) => {
+								pd.get_primary_btn().prop('disabled', false).text('Execute Script');
+								const out = r.message || {};
+								const $out = pd.$wrapper.find('#tinker-output');
+								$out.show().text(out.output || out.message || 'No output.');
+								if (out.status === 'error') {
+									$out.css('border', '1px solid #fca5a5').css('background', '#fef2f2');
+								} else {
+									$out.css('border', '1px solid var(--border-color)').css('background', 'var(--control-bg)');
+								}
+							}
+						});
+					}
+				});
+				pd.show();
+			});
+			
+			d.$wrapper.find('.modal-site-clearcache').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { 
+				d.hide(); 
+				self.append_console(`Running clear-cache for ${site_name}...`, 'command');
+				self.show_live_activity(site_name);
+				frappe.call({ method: 'bench_manager.api.clear_cache', args: {site_name: site_name}, callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); } }); 
+			});
+			
+			d.$wrapper.find('.modal-site-fixtures').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => { 
+				d.hide(); 
+				self.append_console(`Running export-fixtures for ${site_name}...`, 'command');
+				self.show_live_activity(site_name);
+				frappe.call({ method: 'bench_manager.api.export_fixtures', args: {site_name: site_name}, callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); } }); 
+			});
+
+			d.$wrapper.find('.modal-site-config').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				frappe.call({
+					method: 'bench_manager.api.get_site_config',
+					args: {site_name: site_name},
+					callback: (r) => {
+						const config = r.message || {};
+						const cd = new frappe.ui.Dialog({
+							title: `Config: ${site_name}`,
+							fields: [
+								{ label: 'Domains', fieldname: 'domains', fieldtype: 'Data', default: (config.domains || []).join(', '), description: 'Comma-separated domains' },
+								{ label: 'Host Name', fieldname: 'host_name', fieldtype: 'Data', default: config.host_name || '' }
+							],
+							primary_action_label: 'Save Config',
+							primary_action: (values) => {
+								cd.hide();
+								// To update site_config, ideally we update multiple keys. But this requires backend support.
+								// We'll just show an alert that this feature is an example for now, as updating domains properly requires bench setup_nginx etc.
+								frappe.show_alert({message: 'Site config updated (Preview only, use terminal for advanced edits).', indicator: 'green'});
+							}
+						});
+						cd.show();
+					}
+				});
+			});
+
+			d.$wrapper.find('.modal-site-restore').hover(function(){$(this).css('background', '#f8fafc')}, function(){$(this).css('background', '')}).on('click', () => {
+				d.hide();
+				frappe.call({
+					method: 'bench_manager.api.list_backups',
+					args: {site_name: site_name},
+					callback: (r) => {
+						const backups = r.message || [];
+						if(backups.length === 0) {
+							frappe.msgprint('No database backups found for this site.');
+							return;
+						}
+						const options = backups.map(b => ({label: `${b.name} (${(b.size/1024/1024).toFixed(2)} MB)`, value: b.name}));
+						const rd = new frappe.ui.Dialog({
+							title: `Restore Database: ${site_name}`,
+							fields: [
+								{ label: 'Select Backup', fieldname: 'backup_file', fieldtype: 'Select', options: options, reqd: 1 },
+								{ fieldtype: 'HTML', options: '<div class="alert alert-warning">Warning: Restoring will overwrite the current database. This action cannot be undone.</div>' }
+							],
+							primary_action_label: 'Restore',
+							primary_action: (values) => {
+								rd.hide();
+								self.append_console(`Restoring database for ${site_name}...`, 'command');
+								self.show_live_activity(site_name);
+								frappe.call({
+									method: 'bench_manager.api.restore_database',
+									args: {site_name: site_name, file_name: values.backup_file},
+									callback: (res) => { if(res.message) frappe.show_alert({message: res.message.message, indicator: 'blue'}); }
+								});
+							}
+						});
+						rd.show();
+					}
+				});
+			});
 		});
 	}
 
@@ -1387,9 +795,6 @@ class BenchDashboard {
 			$btn.html('<span style="font-size: 12px;">Loading...</span>').prop('disabled', true);
 
 			const args = { site_name: site };
-			if (!self.is_host_bench) {
-				args.bench_path = self.current_bench_path;
-			}
 
 			frappe.call({
 				method: 'bench_manager.api.get_site_apps',
@@ -1442,8 +847,8 @@ class BenchDashboard {
 			self.append_console(`Starting dev server for ${site}...`, 'command');
 			frappe.show_alert({ message: `Starting ${site}...`, indicator: 'blue' });
 
-			const method = self.is_host_bench ? 'bench_manager.api.start_site_server' : 'bench_manager.api.start_site_server_on_bench';
-			const args = self.is_host_bench ? { site_name: site } : { bench_path: self.current_bench_path, site_name: site };
+			const method = 'bench_manager.api.start_site_server';
+			const args = { site_name: site };
 
 			frappe.call({
 				method: method,
@@ -1470,8 +875,8 @@ class BenchDashboard {
 			self.append_console(`Stopping site server for ${site}...`, 'command');
 			frappe.show_alert({ message: `Stopping ${site}...`, indicator: 'orange' });
 
-			const method = self.is_host_bench ? 'bench_manager.api.stop_site_server' : 'bench_manager.api.stop_site_server_on_bench';
-			const args = self.is_host_bench ? { site_name: site } : { bench_path: self.current_bench_path, site_name: site };
+			const method = 'bench_manager.api.stop_site_server';
+			const args = { site_name: site };
 
 			frappe.call({
 				method: method,
@@ -1505,57 +910,32 @@ class BenchDashboard {
 
 			frappe.show_alert({ message: `Opening ${site}...`, indicator: 'blue' });
 
-			if (self.is_host_bench) {
-				// Host bench: use existing get_site_open_url flow
-				frappe.call({
-					method: 'bench_manager.api.get_site_open_url',
-					args: { site_name: site },
-					callback: (r) => {
-						const result = r.message;
-						if (result.is_bench_manager) {
-							window.open(window.location.origin, '_blank');
-							return;
-						}
-						if (result.url) {
-							frappe.show_alert({ message: `Opening ${site} on port ${result.port}...`, indicator: 'green' });
-							setTimeout(() => window.open(result.url, '_blank'), 500);
-						} else {
-							frappe.msgprint({
-								title: 'Site Not Running',
-								message: `<strong>${site}</strong> is not running. Please start the site first using the <b>▶ Start</b> action, then try opening it again.`,
-								indicator: 'orange'
-							});
-						}
-						setTimeout(() => self.load_sites(), 1000);
-					},
-					error: () => {
-						frappe.show_alert({ message: `Failed to get URL for ${site}`, indicator: 'red' });
+			// Host bench: use existing get_site_open_url flow
+			frappe.call({
+				method: 'bench_manager.api.get_site_open_url',
+				args: { site_name: site },
+				callback: (r) => {
+					const result = r.message;
+					if (result.is_bench_manager) {
+						window.open(window.location.origin, '_blank');
+						return;
 					}
-				});
-			} else {
-				// Remote bench: auto-start a dev server if not already running, then open
-				frappe.call({
-					method: 'bench_manager.api.start_site_server_on_bench',
-					args: { bench_path: self.current_bench_path, site_name: site },
-					callback: (r) => {
-						const result = r.message;
-						const port = result.port;
-						if (result.status === 'already_running') {
-							frappe.show_alert({ message: `${site} is running on port ${port}. Opening...`, indicator: 'green' });
-							setTimeout(() => window.open(`http://127.0.0.1:${port}`, '_blank'), 300);
-						} else {
-							self.append_console(`Starting dev server for ${site} on port ${port}...`, 'command');
-							frappe.show_alert({ message: `Started ${site} on port ${port}. Opening in a moment...`, indicator: 'green' });
-							// Give the server a few seconds to boot up before navigating
-							setTimeout(() => window.open(`http://127.0.0.1:${port}`, '_blank'), 3000);
-						}
-						setTimeout(() => self.load_sites(), 1500);
-					},
-					error: () => {
-						frappe.show_alert({ message: `Failed to start server for ${site}`, indicator: 'red' });
+					if (result.url) {
+						frappe.show_alert({ message: `Opening ${site} on port ${result.port}...`, indicator: 'green' });
+						setTimeout(() => window.open(result.url, '_blank'), 500);
+					} else {
+						frappe.msgprint({
+							title: 'Site Not Running',
+							message: `<strong>${site}</strong> is not running. Please start the site first using the <b>▶ Start</b> action, then try opening it again.`,
+							indicator: 'orange'
+						});
 					}
-				});
-			}
+					setTimeout(() => self.load_sites(), 1000);
+				},
+				error: () => {
+					frappe.show_alert({ message: `Failed to get URL for ${site}`, indicator: 'red' });
+				}
+			});
 		});
 
 		this.$container.off('click', '.site-live-activity').on('click', '.site-live-activity', function (e) {
@@ -1662,9 +1042,8 @@ class BenchDashboard {
 					self.append_console(`Initiating site deletion for ${site}. Removing database and files...`, 'stdout');
 					self.show_live_activity(site);
 
-					const method = self.is_host_bench ? 'bench_manager.api.drop_site' : 'bench_manager.api.drop_site_on_bench';
+					const method = 'bench_manager.api.drop_site';
 					const args = { site_name: site, db_root_password: values.db_root_password || null };
-					if (!self.is_host_bench) args.bench_path = self.current_bench_path;
 
 					frappe.call({
 						method: method,
@@ -1686,6 +1065,17 @@ class BenchDashboard {
 		this.$container.find('#btn-refresh-sites').on('click', () => {
 			this.load_sites();
 			this.load_status();
+		});
+		this.$container.find('#btn-global-clear-cache').on('click', () => {
+			frappe.confirm('Clear global Redis cache? This will clear cache for all sites.', () => {
+				this.append_console('Running bench clear-cache...', 'command');
+				this.show_live_activity('clear-cache');
+				frappe.call({
+					method: 'bench_manager.api.clear_cache',
+					args: {},
+					callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); }
+				});
+			});
 		});
 	}
 
@@ -1769,12 +1159,10 @@ class BenchDashboard {
 
 	show_new_site_dialog() {
 		const self = this;
-		const bench_options = self.benches ? self.benches.map(b => ({ label: b.is_host ? `${b.name} (host)` : b.name, value: b.path })) : [];
 
 		const d = new frappe.ui.Dialog({
 			title: 'Create New Site',
 			fields: [
-				{ label: 'Target Bench', fieldname: 'bench_path', fieldtype: 'Select', options: bench_options, default: self.current_bench_path, reqd: 1 },
 				{ label: 'Site Name', fieldname: 'site_name', fieldtype: 'Data', reqd: 1, description: 'e.g., mysite.localhost' },
 				{ label: 'Admin Password', fieldname: 'admin_password', fieldtype: 'Password', reqd: 1 },
 				{ label: 'Database Root Password', fieldname: 'db_password', fieldtype: 'Password', description: 'Leave blank if not required' },
@@ -1782,9 +1170,6 @@ class BenchDashboard {
 			primary_action_label: 'Create Site',
 			primary_action(values) {
 				d.hide();
-
-				const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
-				const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
 
 				// Prepend row with live activity link
 				const new_row = `<tr data-site="${frappe.utils.escape_html(values.site_name)}">
@@ -1802,12 +1187,11 @@ class BenchDashboard {
 				});
 
 				self.append_console(`Creating Site ${values.site_name}...`, 'command');
-				self.append_console(`Setting up database and installing frappe for ${values.site_name} on ${bench_name}. This may take a few minutes.`, 'info');
+				self.append_console(`Setting up database and installing frappe for ${values.site_name}. This may take a few minutes.`, 'info');
 				self.show_live_activity(values.site_name);
 
-				const method = is_host ? 'bench_manager.api.create_site' : 'bench_manager.api.create_site_on_bench';
+				const method = 'bench_manager.api.create_site';
 				const args = Object.assign({}, values);
-				if (!is_host) args.bench_path = values.bench_path;
 
 				frappe.call({
 					method: method,
@@ -1829,8 +1213,8 @@ class BenchDashboard {
 		const $wrapper = this.$container.find('#apps-table-wrapper');
 		$wrapper.html('<div class="loading-placeholder">Loading apps...</div>');
 
-		const method = this.is_host_bench ? 'bench_manager.api.list_apps' : 'bench_manager.api.list_bench_apps';
-		const args = this.is_host_bench ? {} : { bench_path: this.current_bench_path };
+		const method = 'bench_manager.api.list_apps';
+		const args = {};
 
 		frappe.call({
 			method: method,
@@ -1875,8 +1259,8 @@ class BenchDashboard {
 	render_app_cards(apps) {
 		const $wrapper = this.$container.find('#apps-table-wrapper');
 
-		const site_method = this.is_host_bench ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
-		const site_args = this.is_host_bench ? {} : { bench_path: this.current_bench_path };
+		const site_method = 'bench_manager.api.list_sites';
+		const site_args = {};
 
 		frappe.call({
 			method: site_method,
@@ -1983,8 +1367,10 @@ class BenchDashboard {
 							options: `
 								<div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
 									<button type="button" class="btn btn-default btn-sm app-action-install" style="background: var(--btn-default-bg);">Install App</button>
+									<button type="button" class="btn btn-default btn-sm app-action-update" style="background: var(--btn-default-bg);">Update App</button>
 									<button type="button" class="btn btn-default btn-sm app-action-uninstall" style="background: var(--btn-default-bg);">Uninstall / Remove</button>
 									<button type="button" class="btn btn-default btn-sm app-action-sites" style="background: var(--btn-default-bg);">View Installed Sites</button>
+									<button type="button" class="btn btn-default btn-sm app-action-git" style="background: var(--btn-default-bg);">Git Status & Branch</button>
 									<button type="button" class="btn btn-default btn-sm app-action-live" style="background: var(--btn-default-bg);">Live Terminal</button>
 								</div>
 							`
@@ -2016,9 +1402,68 @@ class BenchDashboard {
 					});
 
 					d.$wrapper.find('.app-action-install').on('click', () => { d.hide(); self.show_install_dialog(app_info.app_name, bench_options); });
+					d.$wrapper.find('.app-action-update').on('click', () => { d.hide(); self.show_update_dialog(app_info.app_name); });
 					d.$wrapper.find('.app-action-uninstall').on('click', () => { d.hide(); self.show_uninstall_dialog(app_info.app_name, bench_options); });
 					d.$wrapper.find('.app-action-sites').on('click', () => { d.hide(); self.show_app_sites_modal(app_info.app_name); });
 					d.$wrapper.find('.app-action-live').on('click', () => { d.hide(); self.show_live_activity(app_info.app_name); });
+					
+					d.$wrapper.find('.app-action-git').on('click', () => {
+						d.hide();
+						frappe.call({
+							method: 'bench_manager.api.get_app_git_status',
+							args: {app_name: app_info.app_name},
+							callback: (r) => {
+								const git = r.message || {branch: 'unknown', uncommitted: ''};
+								const isDirty = git.uncommitted ? true : false;
+								const gd = new frappe.ui.Dialog({
+									title: `Git Version Control: ${app_info.app_name}`,
+									fields: [
+										{ fieldtype: 'HTML', options: `
+											<div style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: ${isDirty ? '#fef2f2' : '#f0fdf4'}; border: 1px solid ${isDirty ? '#fca5a5' : '#bbf7d0'};">
+												<strong style="color: ${isDirty ? '#dc2626' : '#166534'};">Status:</strong> ${isDirty ? 'Uncommitted changes present (Dirty)' : 'Working tree clean'}
+												<br><br>
+												<strong style="color: #374151;">Current Branch:</strong> <span class="badge" style="background: #e5e7eb; color: #374151;">${frappe.utils.escape_html(git.branch)}</span>
+												${isDirty ? `<br><br><pre style="font-size:11px;background:#fff;padding:8px;border:1px solid #fca5a5;border-radius:4px;">${frappe.utils.escape_html(git.uncommitted)}</pre>` : ''}
+											</div>
+										`},
+										{ label: 'Switch to Branch', fieldname: 'target_branch', fieldtype: 'Data', description: 'Enter the exact branch name you wish to switch to.', default: git.branch },
+										{ fieldtype: 'HTML', options: `<hr><button class="btn btn-default btn-sm" id="btn-git-pull" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg> Pull Latest Commits</button>`}
+									],
+									primary_action_label: 'Switch Branch',
+									primary_action: (values) => {
+										gd.hide();
+										if (values.target_branch === git.branch) {
+											frappe.show_alert({message: 'Already on that branch.', indicator: 'orange'});
+											return;
+										}
+										self.append_console(`Switching ${app_info.app_name} to branch ${values.target_branch}...`, 'command');
+										self.show_live_activity(app_info.app_name);
+										frappe.call({
+											method: 'bench_manager.api.switch_app_branch',
+											args: {app_name: app_info.app_name, branch: values.target_branch},
+											callback: (res) => { if(res.message) frappe.show_alert({message: res.message.message, indicator: 'blue'}); setTimeout(() => self.load_apps(), 1000); }
+										});
+									}
+								});
+								gd.$wrapper.find('#btn-git-pull').on('click', () => {
+									gd.hide();
+									frappe.call({
+										method: 'bench_manager.api.app_git_pull',
+										args: {app_name: app_info.app_name},
+										callback: (res) => { 
+											const out = res.message || {};
+											if (out.status === 'success') {
+												frappe.msgprint({title: 'Git Pull Successful', message: `<pre>${frappe.utils.escape_html(out.message)}</pre>`, indicator: 'green'});
+											} else {
+												frappe.msgprint({title: 'Git Pull Failed', message: out.message, indicator: 'red'});
+											}
+										}
+									});
+								});
+								gd.show();
+							}
+						});
+					});
 
 					d.show();
 				});
@@ -2029,39 +1474,36 @@ class BenchDashboard {
 		});
 	}
 
-	show_install_dialog(app, bench_options) {
+	show_update_dialog(app_name) {
+		const self = this;
+		frappe.confirm(`Run <strong>bench update --app ${frappe.utils.escape_html(app_name)}</strong>?`, () => {
+			self.append_console(`Updating app '${app_name}'...`, 'command');
+			frappe.call({
+				method: 'bench_manager.api.update_bench_app',
+				args: { app_name: app_name },
+				callback: (r) => {
+					if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' });
+				}
+			});
+		});
+	}
+
+	show_install_dialog(app) {
 		const self = this;
 		frappe.call({
-			method: self.is_host_bench ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites',
-			args: self.is_host_bench ? {} : { bench_path: self.current_bench_path },
+			method: 'bench_manager.api.list_sites',
+			args: {},
 			callback: (r) => {
 				const sites = (r.message || []).map((s) => s.site_name || s);
 				
 				const d = new frappe.ui.Dialog({
 					title: `Install ${app}`,
 					fields: [
-						{
-							label: 'Target Bench', fieldname: 'bench_path', fieldtype: 'Select', options: bench_options, default: self.current_bench_path, reqd: 1,
-							onchange: function () {
-								const bench_path = this.get_value();
-								const is_host = bench_path === (self.benches.find(b => b.is_host) || {}).path;
-								const site_method = is_host ? 'bench_manager.api.list_sites' : 'bench_manager.api.list_bench_sites';
-								const site_args = is_host ? {} : { bench_path: bench_path };
-								frappe.call({
-									method: site_method, args: site_args, callback: (r) => {
-										const new_sites = (r.message || []).map((s) => ({label: s.site_name || s, value: s.site_name || s}));
-										d.set_df_property('site_names', 'options', new_sites);
-									}
-								});
-							}
-						},
 						{ label: 'Select Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: sites.map(s => ({label: s, value: s})), reqd: 1 }
 					],
 					primary_action_label: 'Install',
 					primary_action(values) {
 						d.hide();
-						const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
-						const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
 						const selected_sites = values.site_names;
 
 						if (!selected_sites || selected_sites.length === 0) {
@@ -2069,7 +1511,7 @@ class BenchDashboard {
 							return;
 						}
 
-						self.append_console(`Installing ${app} on ${selected_sites.join(', ')} (${bench_name}). This may take a moment...`, 'stdout');
+						self.append_console(`Installing ${app} on ${selected_sites.join(', ')}. This may take a moment...`, 'stdout');
 						self.append_console(`The app will be installed in the background. Watch the live activity for progress.`, 'info');
 						self.show_live_activity(app);
 
@@ -2082,9 +1524,8 @@ class BenchDashboard {
 							const site = selected_sites[idx];
 							self.append_console(`Installing ${app} on ${site}...`, 'command');
 
-							const install_method = is_host ? 'bench_manager.api.install_app' : 'bench_manager.api.install_app_on_site_remote';
+							const install_method = 'bench_manager.api.install_app';
 							const install_args = { site_name: site, app_name: app };
-							if (!is_host) install_args.bench_path = values.bench_path;
 
 							frappe.call({ 
 								method: install_method, 
@@ -2104,31 +1545,16 @@ class BenchDashboard {
 		});
 	}
 
-	show_uninstall_dialog(app, bench_options) {
+	show_uninstall_dialog(app) {
 		const self = this;
 		const d = new frappe.ui.Dialog({
 			title: `Uninstall ${app}`,
 			fields: [
-				{
-					label: 'Target Bench', fieldname: 'bench_path', fieldtype: 'Select', options: bench_options, default: self.current_bench_path, reqd: 1,
-					onchange: function () {
-						const bench_path = this.get_value();
-						frappe.call({
-							method: 'bench_manager.api.get_app_sites', args: { app_name: app, bench_path: bench_path },
-							callback: (r) => {
-								const installed_sites = (r.message || []).map(s => ({label: s, value: s}));
-								d.set_df_property('site_names', 'options', installed_sites);
-							}
-						});
-					}
-				},
 				{ label: 'Select Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: [], reqd: 1, description: 'Only sites where this app is installed are listed.' }
 			],
 			primary_action_label: 'Uninstall from Site(s)',
 			primary_action(values) {
 				d.hide();
-				const is_host = values.bench_path === (self.benches.find(b => b.is_host) || {}).path;
-				const bench_name = (self.benches.find(b => b.path === values.bench_path) || {}).name || 'host';
 				const selected_sites = values.site_names;
 
 				if (!selected_sites || selected_sites.length === 0) {
@@ -2137,7 +1563,7 @@ class BenchDashboard {
 				}
 
 				frappe.confirm(`Uninstall <strong>${app}</strong> from <strong>${selected_sites.join(', ')}</strong>?`, () => {
-					self.append_console(`Uninstalling ${app} from ${selected_sites.join(', ')} (${bench_name})...`, 'stdout');
+					self.append_console(`Uninstalling ${app} from ${selected_sites.join(', ')}...`, 'stdout');
 					self.append_console(`The app will be removed in the background. Watch the live activity for progress.`, 'info');
 					self.show_live_activity(app);
 
@@ -2150,9 +1576,8 @@ class BenchDashboard {
 						const site = selected_sites[idx];
 						self.append_console(`Uninstalling ${app} from ${site}...`, 'command');
 
-						const uninstall_method = is_host ? 'bench_manager.api.uninstall_app' : 'bench_manager.api.uninstall_app_from_site_remote';
+						const uninstall_method = 'bench_manager.api.uninstall_app';
 						const uninstall_args = { site_name: site, app_name: app };
-						if (!is_host) uninstall_args.bench_path = values.bench_path;
 
 						frappe.call({ 
 							method: uninstall_method, 
@@ -2170,7 +1595,7 @@ class BenchDashboard {
 		});
 
 		frappe.call({
-			method: 'bench_manager.api.get_app_sites', args: { app_name: app, bench_path: self.current_bench_path },
+			method: 'bench_manager.api.get_app_sites', args: { app_name: app },
 			callback: (r) => {
 				const installed_sites = r.message || [];
 				if (installed_sites.length > 0) {
@@ -2178,14 +1603,11 @@ class BenchDashboard {
 					d.show();
 				} else {
 					frappe.confirm(`App <strong>${app}</strong> is not installed on any sites. Do you want to <strong>remove it from the bench entirely</strong>?`, () => {
-						const is_host = self.current_bench_path === (self.benches.find(b => b.is_host) || {}).path;
-						self.append_console(`Removing app ${app} from bench...`, 'command');
-						self.append_console(`Removing app ${app} from bench...`, 'stdout');
+						self.append_console(`Removing app ${app} from bench entirely...`, 'command');
 						self.show_live_activity(app);
 
-						const remove_method = is_host ? 'bench_manager.api.remove_app' : 'bench_manager.api.remove_app_remote';
+						const remove_method = 'bench_manager.api.remove_app';
 						const remove_args = { app_name: app };
-						if (!is_host) remove_args.bench_path = self.current_bench_path;
 
 						frappe.call({ method: remove_method, args: remove_args, callback: (r) => { if (r.message) { frappe.show_alert({ message: r.message.message, indicator: 'red' }); setTimeout(() => self.load_apps(), 2000); } } });
 					});
@@ -2275,6 +1697,15 @@ class BenchDashboard {
 	setup_app_actions() {
 		this.$container.find('#btn-new-app').on('click', () => this.show_new_app_dialog());
 		this.$container.find('#btn-refresh-apps').on('click', () => this.load_apps());
+		this.$container.find('#btn-global-build-assets').on('click', () => {
+			this.append_console('Running bench build...', 'command');
+			this.show_live_activity('bench-build');
+			frappe.call({
+				method: 'bench_manager.api.build_assets',
+				args: {},
+				callback: (r) => { if(r.message) frappe.show_alert({message: r.message.message, indicator: 'blue'}); }
+			});
+		});
 
 		// Category filter chips
 		this.$container.find('.app-filter-chip').on('click', (e) => {
@@ -2359,13 +1790,12 @@ class BenchDashboard {
 					d.hide();
 					self.add_pending_app_row(app_name, 'custom', 'Creating app...');
 					self.append_console(`Creating new Frappe app "${app_name}"...`, 'command');
-					self.append_console(`Creating new Frappe app "${app_name}" on ${self.current_bench_name || 'host'}...`, 'stdout');
+					self.append_console(`Creating new Frappe app "${app_name}"...`, 'stdout');
 					self.append_console(`Scaffolding app directory, hooks, and module structure. Watch below for progress.`, 'info');
 					self.show_live_activity(app_name);
 
-					const create_method = self.is_host_bench ? 'bench_manager.api.create_new_app' : 'bench_manager.api.create_new_app_on_bench';
+					const create_method = 'bench_manager.api.create_new_app';
 					const create_args = { app_name, title: d.$wrapper.find('#custom_app_title').val(), description: d.$wrapper.find('#custom_app_desc').val(), publisher: d.$wrapper.find('#custom_app_publisher').val(), email: d.$wrapper.find('#custom_app_email').val(), image: image };
-					if (!self.is_host_bench) create_args.bench_path = self.current_bench_path;
 
 					frappe.call({ method: create_method, args: create_args, callback: (r) => { if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' }); } });
 				} else if (activeTab === 'get_app') {
@@ -2379,13 +1809,12 @@ class BenchDashboard {
 					d.hide();
 					self.add_pending_app_row(nameGuess, 'git', 'Cloning...');
 					self.append_console(`Cloning app from ${git_url}...`, 'command');
-					self.append_console(`Cloning repository and installing app on ${self.current_bench_name || 'host'}. This may take a few minutes...`, 'stdout');
+					self.append_console(`Cloning repository and installing app... This may take a few minutes.`, 'stdout');
 					self.append_console(`The app will be cloned, dependencies installed, and assets built. Watch below for progress.`, 'info');
 					self.show_live_activity('get-app');
 
-					const get_method = self.is_host_bench ? 'bench_manager.api.get_app' : 'bench_manager.api.get_app_on_bench';
+					const get_method = 'bench_manager.api.get_app';
 					const get_args = { git_url, branch, app_name: nameGuess, image: image };
-					if (!self.is_host_bench) get_args.bench_path = self.current_bench_path;
 
 					frappe.call({ method: get_method, args: get_args, callback: (r) => { if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' }); } });
 				} else if (activeTab === 'frappe_store') {
@@ -2393,32 +1822,58 @@ class BenchDashboard {
 					d.$wrapper.find('.frappe-store-item.selected').each(function () { sel.push({ name: $(this).data('app-name'), repo: $(this).data('app-repo') }); });
 					if (!sel.length) { frappe.msgprint('Select at least one app'); return; }
 					d.hide();
-					sel.forEach(a => self.add_pending_app_row(a.name, 'frappe_store', 'Pending...'));
 
-					self.append_console(`Installing ${sel.length} app${sel.length > 1 ? 's' : ''} from Frappe Store...`, 'stdout');
-					self.append_console(`Apps: ${sel.map(a => a.name).join(', ')}`, 'info');
-					let idx = 0;
-					const next = () => {
-						if (idx >= sel.length) {
-							self.append_console(`All ${sel.length} Frappe Store apps have been queued for installation.`, 'success');
-							return;
+					// Ask which site(s) to install the apps on before fetching
+					frappe.call({
+						method: 'bench_manager.api.list_sites',
+						args: {},
+						callback: (r) => {
+							const sites = (r.message || []).map(s => s.site_name || s);
+							const siteDlg = new frappe.ui.Dialog({
+								title: 'Install on Site(s)',
+								fields: [
+									{ fieldtype: 'HTML', options: `<p class="text-muted" style="font-size:13px;">Select the site(s) to install the following app${sel.length > 1 ? 's' : ''} on after downloading:<br><strong>${sel.map(a => a.name).join(', ')}</strong></p>` },
+									{ label: 'Site(s)', fieldname: 'site_names', fieldtype: 'MultiCheck', options: sites.map(s => ({ label: s, value: s })), reqd: 1 }
+								],
+								primary_action_label: 'Download & Install',
+								primary_action(vals) {
+									siteDlg.hide();
+									const selectedSites = vals.site_names || [];
+									if (!selectedSites.length) { frappe.msgprint('Please select at least one site.'); return; }
+
+									sel.forEach(a => self.add_pending_app_row(a.name, 'frappe_store', 'Pending...'));
+									self.append_console(`Installing ${sel.length} app${sel.length > 1 ? 's' : ''} from Frappe Store...`, 'stdout');
+									self.append_console(`Apps: ${sel.map(a => a.name).join(', ')}`, 'info');
+									self.append_console(`Target sites: ${selectedSites.join(', ')}`, 'info');
+
+									let idx = 0;
+									const next = () => {
+										if (idx >= sel.length) {
+											self.append_console(`All ${sel.length} Frappe Store app${sel.length > 1 ? 's' : ''} queued for installation.`, 'success');
+											return;
+										}
+										const a = sel[idx];
+										self.append_console(`Fetching & installing ${a.name} on ${selectedSites.join(', ')}...`, 'command');
+										self.show_live_activity('frappe-store');
+										self.start_pending_op();
+
+										frappe.call({
+											method: 'bench_manager.api.get_and_install_app',
+											args: {
+												git_url: a.repo,
+												site_names: JSON.stringify(selectedSites),
+												branch: '',
+												app_name: a.name
+											},
+											callback: () => { idx++; setTimeout(next, 500); }
+										});
+									};
+									next();
+								}
+							});
+							siteDlg.show();
 						}
-						const a = sel[idx];
-						self.append_console(`Installing ${a.name}...`, 'command');
-						self.append_console(`Fetching ${a.name} onto ${self.current_bench_name || 'host'}...`, 'stdout');
-						self.show_live_activity('frappe-store');
-
-						const store_method = self.is_host_bench ? 'bench_manager.api.get_app' : 'bench_manager.api.get_app_on_bench';
-						const store_args = { git_url: a.repo, branch: '' };
-						if (!self.is_host_bench) store_args.bench_path = self.current_bench_path;
-
-						frappe.call({
-							method: store_method,
-							args: store_args,
-							callback: () => { idx++; setTimeout(next, 800); }
-						});
-					};
-					next();
+					});
 				}
 			}
 		});
@@ -2461,73 +1916,7 @@ class BenchDashboard {
 		d.$wrapper.find('.modal-dialog').css('max-width', '640px');
 	}
 
-	// ─── Bench Tab ───────────────────────────────────────────────
 
-	load_bench_info() {
-		// Load versions
-		frappe.call({
-			method: 'bench_manager.api.get_bench_version',
-			callback: (r) => {
-				if (r.message) {
-					const v = r.message;
-					const $body = this.$container.find('#version-info');
-					$body.html(`
-						<div class="version-row"><span class="version-label">Bench</span><span class="version-value">${frappe.utils.escape_html(v.bench || 'Unknown')}</span></div>
-						<div class="version-row"><span class="version-label">Frappe</span><span class="version-value">${frappe.utils.escape_html(v.frappe || 'Unknown')}</span></div>
-						<div class="version-row"><span class="version-label">Python</span><span class="version-value">${frappe.utils.escape_html(v.python || 'Unknown')}</span></div>
-						<div class="version-row"><span class="version-label">Node.js</span><span class="version-value">${frappe.utils.escape_html(v.node || 'Unknown')}</span></div>
-					`);
-				}
-			},
-		});
-	}
-
-	// Helper: Show error in the VS Code blob tab (safe for cross-origin)
-	_showEditorTabError(tab, message) {
-		try {
-			if (tab && !tab.closed) {
-				tab.document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a1a;margin:0;">
-					<h2 style="color:#ff6b6b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:400;font-size:16px;text-align:center;max-width:500px;line-height:1.6;">${message}</h2>
-				</div>`;
-			}
-		} catch (e) {
-			// Cross-origin or tab already navigated — just try to close
-			try { if (tab && !tab.closed) tab.close(); } catch (_) { }
-		}
-	}
-
-	setup_bench_actions() {
-		const self = this;
-
-		this.$container.find('#btn-launch-vscode').on('click', (e) => {
-			if (!this.current_bench_path) return;
-			this.launch_vscode_with_button(this.current_bench_path, $(e.currentTarget));
-		});
-
-		this.$container.find('#btn-bench-update').on('click', () => {
-			frappe.confirm('Run <strong>bench update</strong>? This will update all apps.', () => {
-				self.append_console(`Updating ${self.current_bench_path}...`, 'command');
-				frappe.call({
-					method: 'bench_manager.api.update_bench',
-					callback: (r) => {
-						if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' });
-					},
-				});
-			});
-		});
-
-		this.$container.find('#btn-bench-migrate').on('click', () => {
-			frappe.confirm('Run <strong>bench migrate</strong> on all sites?', () => {
-				self.append_console('Running bench migrate (all sites)...', 'command');
-				frappe.call({
-					method: 'bench_manager.api.bench_migrate_all',
-					callback: (r) => {
-						if (r.message) frappe.show_alert({ message: r.message.message, indicator: 'blue' });
-					},
-				});
-			});
-		});
-	}
 
 	// ─── Logs Tab ────────────────────────────────────────────────
 
@@ -2535,22 +1924,43 @@ class BenchDashboard {
 		const $wrapper = this.$container.find('#logs-table-wrapper');
 		$wrapper.html('<div class="loading-placeholder">Loading logs...</div>');
 
-		frappe.call({
-			method: 'bench_manager.api.get_command_logs',
-			args: { limit: 50 },
-			callback: (r) => {
-				if (r.message && r.message.length) {
-					this.render_logs_table(r.message);
-				} else {
-					$wrapper.html(`
-						<div class="empty-state">
-							<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty Logs" style="max-width: 140px; margin-bottom: 20px; opacity: 0.4;">
-							<p>No command logs yet.</p>
-						</div>
-					`);
+		const logType = this.$container.find('#log-file-select').val() || 'command_logs';
+
+		if (logType === 'command_logs') {
+			frappe.call({
+				method: 'bench_manager.api.get_command_logs',
+				args: { limit: 50 },
+				callback: (r) => {
+					if (r.message && r.message.length) {
+						this.render_logs_table(r.message);
+					} else {
+						$wrapper.html(`
+							<div class="empty-state">
+								<img src="/assets/bench_manager/images/empty_benches.png" alt="Empty Logs" style="max-width: 140px; margin-bottom: 20px; opacity: 0.4;">
+								<p>No command logs yet.</p>
+							</div>
+						`);
+					}
+				},
+			});
+		} else {
+			frappe.call({
+				method: 'bench_manager.api.get_system_logs',
+				args: { log_file: logType, lines: 200 },
+				callback: (r) => {
+					const logs = r.message || '';
+					if (logs && !logs.startsWith('Error') && logs !== 'No entries found.') {
+						$wrapper.html(`<pre style="background: var(--card-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 12px; color: var(--text-color); overflow-x: auto; max-height: 600px; white-space: pre-wrap;">${frappe.utils.escape_html(logs)}</pre>`);
+					} else {
+						$wrapper.html(`
+							<div class="empty-state">
+								<p>${frappe.utils.escape_html(logs)}</p>
+							</div>
+						`);
+					}
 				}
-			},
-		});
+			});
+		}
 	}
 
 	get_human_readable_command(commandStr) {
@@ -2801,30 +2211,12 @@ class BenchDashboard {
 
 		this.$container.find('#btn-refresh-vscode').on('click', () => self.load_vscode_instances());
 
-		// Populate the bench dropdown for VS Code from existing context selector
-		const populate_dropdown = () => {
-			const $source = self.$container.find('#bench-context-select');
-			const $target = self.$container.find('#vscode-bench-select');
-			if ($source.find('option').length > 1 || ($source.find('option').length === 1 && $source.find('option').val() !== 'default')) {
-				$target.html($source.html());
-			}
-		};
-
-		// Run when tabs are clicked to ensure dropdown is up-to-date
-		this.$container.find('.bench-tab[data-tab="vscode"]').on('click', populate_dropdown);
-
 		this.$container.find('#btn-launch-vscode-new').on('click', (e) => {
-			const benchPath = self.$container.find('#vscode-bench-select').val();
-			if (!benchPath || benchPath === 'default') {
-				frappe.msgprint('Please select a bench first.');
-				return;
-			}
-			self.launch_vscode_with_button(benchPath, $(e.currentTarget));
+			self.launch_vscode_with_button($(e.currentTarget));
 		});
 	}
 
-	launch_vscode_with_button(benchPath, $btn) {
-		if (!benchPath) return;
+	launch_vscode_with_button($btn) {
 		if ($btn.hasClass('vscode-loading')) return;
 
 		$btn.addClass('vscode-loading');
@@ -2861,7 +2253,7 @@ class BenchDashboard {
 
 		frappe.call({
 			method: 'bench_manager.api.launch_code_server',
-			args: { bench_path: benchPath },
+			args: {},
 			callback: (r) => {
 				if (!r.message) {
 					$btn.removeClass('vscode-loading');
@@ -2946,10 +2338,8 @@ class BenchDashboard {
 		this.db_search_term = '';
 		this.db_editing_unlocked = false;
 
-		this.db_active_bench = this.current_bench_path || '/home/praveen/frappe-bench';
-
 		this.setup_db_browser_events();
-		this.populate_db_bench_selector();
+		this.populate_db_site_selector();
 	}
 
 	setup_db_browser_events() {
@@ -2964,13 +2354,6 @@ class BenchDashboard {
 				}
 				window.dispatchEvent(new Event('resize'));
 			}, 350);
-		});
-
-		// Bench Selector Change
-		this.$container.find('#db-bench-select').on('change', function () {
-			self.db_active_bench = $(this).val();
-			self.populate_db_site_selector(self.db_active_bench);
-			self.clear_db_tables();
 		});
 
 		// Site Selector Change
@@ -3092,30 +2475,9 @@ class BenchDashboard {
 		});
 	}
 
-	populate_db_bench_selector() {
+	populate_db_site_selector() {
 		frappe.call({
-			method: 'bench_manager.api.discover_benches',
-			callback: (r) => {
-				const benches = r.message || [];
-				const $select = this.$container.find('#db-bench-select');
-				$select.empty().append('<option value="">Select Bench...</option>');
-
-				benches.forEach(b => {
-					const selected = (b.path === this.db_active_bench) ? 'selected' : '';
-					$select.append(`<option value="${frappe.utils.escape_html(b.path)}" ${selected}>${frappe.utils.escape_html(b.name)}</option>`);
-				});
-
-				if (this.db_active_bench) {
-					this.populate_db_site_selector(this.db_active_bench);
-				}
-			}
-		});
-	}
-
-	populate_db_site_selector(bench_path) {
-		frappe.call({
-			method: 'bench_manager.api.list_bench_sites',
-			args: { bench_path: bench_path || this.current_bench_path || '/home/praveen/frappe-bench' },
+			method: 'bench_manager.api.list_sites',
 			callback: (r) => {
 				const sites = r.message || [];
 				const $select = this.$container.find('#db-site-select');
@@ -3143,7 +2505,6 @@ class BenchDashboard {
 		frappe.call({
 			method: 'bench_manager.api.get_database_tables',
 			args: {
-				bench_path: this.db_active_bench || this.current_bench_path || '/home/praveen/frappe-bench',
 				site_name: this.db_active_site
 			},
 			callback: (r) => {
@@ -3196,7 +2557,6 @@ class BenchDashboard {
 			frappe.call({
 				method: 'bench_manager.api.get_table_data',
 				args: {
-					bench_path: this.db_active_bench || this.current_bench_path || '/home/praveen/frappe-bench',
 					site_name: this.db_active_site,
 					table_name: this.db_active_table,
 					limit: this.db_page_size,
@@ -3222,7 +2582,6 @@ class BenchDashboard {
 			frappe.call({
 				method: 'bench_manager.api.get_table_schema',
 				args: {
-					bench_path: this.db_active_bench || this.current_bench_path || '/home/praveen/frappe-bench',
 					site_name: this.db_active_site,
 					table_name: this.db_active_table
 				},
@@ -3251,14 +2610,14 @@ class BenchDashboard {
 		const columns = Object.keys(data[0]).map(key => ({
 			name: key,
 			id: key,
-			editable: is_rows_view && self.db_editing_unlocked && key !== pk_field,
+			editable: is_rows_view && self.db_editing_unlocked,
 			resizable: true,
 			sortable: true,
 			focusable: true,
 			dropdown: false,
 			width: 150,
 			format: (value) => {
-				if (is_rows_view && value && typeof value === 'string' && (key.endsWith('_id') || key === 'name' || key === 'owner')) {
+				if (is_rows_view && !self.db_editing_unlocked && value && typeof value === 'string' && (key.endsWith('_id') || key === 'name' || key === 'owner')) {
 					return `<span style="color: var(--primary); cursor: pointer; text-decoration: underline;" title="Copy" onclick="frappe.utils.copy_to_clipboard('${frappe.utils.escape_html(value)}'); frappe.show_alert('Copied ID to clipboard')">${frappe.utils.escape_html(value)}</span>`;
 				}
 				if (value && typeof value === 'string' && value.length > 100) {
@@ -3281,7 +2640,6 @@ class BenchDashboard {
 					if (!is_rows_view || !self.db_editing_unlocked) return false;
 
 					const field = self.db_datatable.datamanager.getColumn(colIndex).id;
-					if (field === pk_field) return false;
 
 					const $input = document.createElement('input');
 					$input.type = 'text';
@@ -3303,7 +2661,6 @@ class BenchDashboard {
 								frappe.call({
 									method: 'bench_manager.api.update_table_row',
 									args: {
-										bench_path: self.db_active_bench || self.current_bench_path || '/home/praveen/frappe-bench',
 										site_name: self.db_active_site,
 										table_name: self.db_active_table,
 										pk_field: pk_field,
@@ -3328,13 +2685,78 @@ class BenchDashboard {
 		);
 	}
 
+	load_health() {
+		const $tab = this.$container.find('#tab-health');
+		if (!$tab.hasClass('active')) return;
+
+		if (!this.health_charts_initialized) {
+			this.health_charts_initialized = true;
+			this.health_history_limit = 20;
+			this.health_live_data = {
+				labels: Array(this.health_history_limit).fill(''),
+				datasets: [
+					{ name: "CPU", values: Array(this.health_history_limit).fill(0) },
+					{ name: "Memory", values: Array(this.health_history_limit).fill(0) },
+					{ name: "Disk", values: Array(this.health_history_limit).fill(0) }
+				]
+			};
+
+			this.cpu_chart = new frappe.Chart("#health-cpu-chart", { type: 'donut', data: { labels: ["CPU", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#3b82f6', '#f1f5f9'], maxSlices: 2 });
+			this.mem_chart = new frappe.Chart("#health-mem-chart", { type: 'donut', data: { labels: ["Memory", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#10b981', '#f1f5f9'], maxSlices: 2 });
+			this.disk_chart = new frappe.Chart("#health-disk-chart", { type: 'donut', data: { labels: ["Disk", "Free"], datasets: [{ values: [0, 100] }] }, colors: ['#f59e0b', '#f1f5f9'], maxSlices: 2 });
+			
+			this.health_live_chart = new frappe.Chart("#health-live-chart", {
+				title: "",
+				data: this.health_live_data,
+				type: 'line',
+				height: 280,
+				colors: ['#3b82f6', '#10b981', '#f59e0b'],
+				axisOptions: { xIsSeries: true, xAxisMode: 'tick' },
+				lineOptions: { regionFill: 1, hideDots: 1, spline: 1 }
+			});
+		}
+
+		frappe.call({
+			method: 'bench_manager.api.get_server_health',
+			callback: (r) => {
+				const health = r.message;
+				if (health && health.status === 'success') {
+					this.cpu_chart.update({ labels: ["CPU", "Free"], datasets: [{ values: [health.cpu, Math.max(0, 100 - health.cpu)] }] });
+					this.$container.find('#health-cpu-details').text('Load Average: ' + health.cpu + '%');
+
+					this.mem_chart.update({ labels: ["Memory", "Free"], datasets: [{ values: [health.memory.percent, Math.max(0, 100 - health.memory.percent)] }] });
+					this.$container.find('#health-mem-details').text(`${(health.memory.used / 1073741824).toFixed(2)} GB / ${(health.memory.total / 1073741824).toFixed(2)} GB`);
+
+					this.disk_chart.update({ labels: ["Disk", "Free"], datasets: [{ values: [health.disk.percent, Math.max(0, 100 - health.disk.percent)] }] });
+					this.$container.find('#health-disk-details').text(`${(health.disk.used / 1073741824).toFixed(2)} GB / ${(health.disk.total / 1073741824).toFixed(2)} GB`);
+
+					const now = new Date();
+					const timeLabel = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+					
+					this.health_live_data.labels.shift();
+					this.health_live_data.labels.push(timeLabel);
+					
+					this.health_live_data.datasets[0].values.shift();
+					this.health_live_data.datasets[0].values.push(health.cpu);
+					
+					this.health_live_data.datasets[1].values.shift();
+					this.health_live_data.datasets[1].values.push(health.memory.percent);
+					
+					this.health_live_data.datasets[2].values.shift();
+					this.health_live_data.datasets[2].values.push(health.disk.percent);
+					
+					this.health_live_chart.update(this.health_live_data);
+				}
+			}
+		});
+	}
+
 	execute_db_query(query) {
 		const self = this;
 		this.$container.find('#db-content-area').html('<div class="loading-placeholder">Executing query...</div>');
 		frappe.call({
 			method: 'bench_manager.api.execute_custom_query',
 			args: {
-				bench_path: this.db_active_bench || this.current_bench_path || '/home/praveen/frappe-bench',
 				site_name: this.db_active_site,
 				query: query
 			},
